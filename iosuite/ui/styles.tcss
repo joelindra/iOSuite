@@ -1,0 +1,236 @@
+/* iOSuite Trace Dark Modern Responsive Stylesheet */
+
+Screen {
+    background: #090d16;
+    color: #e2e8f0;
+    layout: vertical;
+}
+
+#header-bar {
+    dock: top;
+    height: 2;
+    background: #0f172a;
+    color: #38bdf8;
+    border-bottom: solid #1e293b;
+    padding: 0 1;
+}
+
+#main-container {
+    height: 1fr;
+    layout: horizontal;
+}
+
+#sidepane {
+    width: 32;
+    min-width: 24;
+    max-width: 38;
+    height: 100%;
+    border-right: solid #1e293b;
+    background: #090d16;
+    layout: vertical;
+}
+
+#search-box {
+    dock: top;
+    height: 2;
+    padding: 0 1;
+    background: #0f172a;
+    border-bottom: solid #1e293b;
+}
+
+#search-input {
+    width: 100%;
+    height: 1;
+    background: transparent;
+    border: none;
+    color: #f8fafc;
+    padding: 0;
+}
+
+#search-input:focus {
+    border: none;
+}
+
+#filter-bar {
+    height: 1;
+    background: #0b1120;
+    padding: 0 1;
+    border-bottom: solid #172033;
+}
+
+#event-list {
+    height: 1fr;
+    background: #090d16;
+    scrollbar-color: #38bdf8 #0f172a;
+    scrollbar-size-vertical: 1;
+}
+
+.event-item {
+    padding: 0 1;
+    border-bottom: solid #172033;
+    background: #090d16;
+}
+
+.event-item:hover {
+    background: #131c2e;
+}
+
+.event-item.-selected {
+    background: #172338;
+    border-left: thick #38bdf8;
+}
+
+#detail-pane {
+    width: 1fr;
+    height: 100%;
+    background: #090d16;
+    layout: vertical;
+}
+
+TabbedContent {
+    height: 100%;
+    background: #090d16;
+}
+
+Tabs {
+    background: #0f172a;
+    border-bottom: solid #1e293b;
+    height: 3;
+}
+
+Tab {
+    padding: 0 1;
+    color: #94a3b8;
+    background: transparent;
+}
+
+Tab:hover {
+    color: #f8fafc;
+    background: #1e293b;
+}
+
+Tab.-active {
+    color: #38bdf8;
+    text-style: bold;
+    background: #172338;
+}
+
+Underline {
+    color: #38bdf8;
+}
+
+TabPane {
+    padding: 0 1;
+    background: #090d16;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-color: #38bdf8 #0f172a;
+    scrollbar-size-vertical: 1;
+    scrollbar-gutter: stable;
+}
+
+#log-stream {
+    height: 100%;
+    background: #0b0f19;
+    color: #f8fafc;
+    scrollbar-color: #38bdf8 #0f172a;
+    scrollbar-size-vertical: 1;
+}
+
+#status-bar {
+    dock: bottom;
+    height: 1;
+    background: #0f172a;
+    color: #94a3b8;
+    padding: 0 1;
+}
+
+/* Category Badges */
+.badge-ui {
+    background: #064e3b;
+    color: #34d399;
+    text-style: bold;
+}
+
+.badge-nav {
+    background: #1e1b4b;
+    color: #818cf8;
+    text-style: bold;
+}
+
+.badge-swiftui {
+    background: #451a03;
+    color: #fbbf24;
+    text-style: bold;
+}
+
+.badge-deeplink {
+    background: #3b0764;
+    color: #c084fc;
+    text-style: bold;
+}
+
+.badge-webview {
+    background: #450a0a;
+    color: #f87171;
+    text-style: bold;
+}
+
+.badge-network {
+    background: #172554;
+    color: #60a5fa;
+    text-style: bold;
+}
+
+.badge-security {
+    background: #b91c1c;
+    color: #ffffff;
+    text-style: bold;
+}
+
+/* Modal dialogs */
+ModalScreen {
+    align: center middle;
+    background: rgba(9, 13, 22, 0.85);
+}
+
+.dialog-box {
+    width: 72;
+    max-width: 92%;
+    height: auto;
+    background: #0f172a;
+    border: round #38bdf8;
+    padding: 1 2;
+}
+
+.field-label {
+    color: #94a3b8;
+    margin-top: 1;
+}
+
+#tamper-input {
+    margin-top: 1;
+    background: #1e293b;
+    border: solid #38bdf8;
+    color: #f8fafc;
+}
+
+.modal-buttons {
+    height: 3;
+    margin-top: 1;
+}
+
+Button {
+    background: #1e293b;
+    color: #f8fafc;
+    border: none;
+    height: 3;
+    margin-top: 1;
+    margin-right: 1;
+}
+
+Button:hover {
+    background: #38bdf8;
+    color: #090d16;
+    text-style: bold;
+}

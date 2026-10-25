@@ -1,0 +1,2749 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>iOSuite Trace - Reverse Engineering Desktop</title>
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            mono: ['"JetBrains Mono"', 'monospace'],
+            sans: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            cyber: {
+              950: '#07080b',
+              900: '#0c0e14',
+              850: '#11131a',
+              800: '#161922',
+              750: '#1b1f2b',
+              700: '#232838',
+              600: '#32394e',
+              border: '#1e2333',
+              cyan: '#00f0ff',
+              neon: '#06b6d4',
+              purple: '#8b5cf6',
+              violet: '#a855f7',
+              emerald: '#10b981',
+              amber: '#f59e0b',
+              rose: '#f43f5e',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- Petite-Vue CDN for zero-build reactivity -->
+  <script src="https://cdn.jsdelivr.net/npm/petite-vue@0.4.1/dist/petite-vue.iife.js"></script>
+
+  <style>
+    :root {
+      --bg-base: #07080b;
+      --bg-surface: #0c0e14;
+      --bg-card: #11131a;
+      --border-subtle: #1e2333;
+      --accent-cyan: #00f0ff;
+    }
+    body {
+      background-color: var(--bg-base);
+      color: #e2e8f0;
+      font-family: 'Inter', sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+    /* Sleek cyber scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0c0e14;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #232838;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #38425d;
+    }
+    .font-code {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .glow-cyan {
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.15);
+    }
+    .glow-purple {
+      box-shadow: 0 0 15px rgba(139, 92, 246, 0.18);
+    }
+    .badge-glow {
+      text-shadow: 0 0 8px currentColor;
+    }
+    /* Disassembly & Hex highlighting */
+    .asm-reg { color: #38bdf8; font-weight: 500; }
+    .asm-imm { color: #4ade80; }
+    .asm-mem { color: #fbbf24; }
+    .asm-comment { color: #64748b; font-style: italic; }
+    .asm-mnemonic { color: #c084fc; font-weight: 600; }
+    .asm-branch { color: #f43f5e; font-weight: 600; }
+    .hex-byte {
+      display: inline-block;
+      width: 1.65rem;
+      text-align: center;
+      transition: all 0.1s ease;
+      cursor: crosshair;
+    }
+    .hex-byte:hover {
+      background-color: #00f0ff;
+      color: #000;
+      font-weight: 700;
+      border-radius: 2px;
+      box-shadow: 0 0 8px #00f0ff;
+    }
+    .highlight-match {
+      background-color: rgba(245, 158, 11, 0.35);
+      color: #fef08a;
+      border-bottom: 2px solid #f59e0b;
+      padding: 0 2px;
+      border-radius: 2px;
+    }
+    /* Pulse dot */
+    @keyframes pulse-ring {
+      0% { transform: scale(0.9); opacity: 0.8; }
+      50% { transform: scale(1.4); opacity: 0; }
+      100% { transform: scale(0.9); opacity: 0; }
+    }
+    .pulse-ring {
+      animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      max-width: 100vw;
+      max-height: 100vh;
+      overflow: hidden !important;
+    }
+  </style>
+</head>
+<body class="h-screen w-screen max-w-full max-h-screen overflow-hidden flex flex-col antialiased bg-cyber-950 text-gray-200">
+  <div id="app" v-scope @vue:mounted="mounted()" @keydown.window="handleGlobalKey($event)" @click="closeAllDropdowns()" class="h-full w-full max-w-full max-h-full overflow-hidden flex flex-col bg-cyber-950">
+
+    <!-- TOP HEADER BAR -->
+    <header class="h-13 min-h-[52px] bg-cyber-900 border-b border-cyber-border px-3 sm:px-4 flex items-center justify-between shrink-0 select-none relative z-30 min-w-0 max-w-full">
+      <!-- Left Section: Branding & Clean Target Capsule -->
+      <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 max-w-[60%]">
+        <!-- Logo & Title -->
+        <div class="flex items-center space-x-2 shrink-0">
+          <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-400 via-cyan-500 to-purple-600 flex items-center justify-center shadow-md shadow-cyan-500/20">
+            <svg class="w-4 h-4 text-black" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <span class="text-sm font-bold tracking-wider text-white font-mono hidden xs:inline">iOSUITE</span>
+          <span class="text-[9px] font-mono px-1.5 py-0.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 rounded font-semibold">v0.2</span>
+        </div>
+
+        <div class="h-4 w-px bg-cyber-border shrink-0"></div>
+
+        <!-- Sleek Interactive Target Capsule (Click to Select / Switch App) -->
+        <button
+          @click="openAppSelector()"
+          class="flex items-center space-x-1.5 sm:space-x-2 bg-cyber-850 hover:bg-cyber-800 border border-cyber-border hover:border-cyan-500/60 rounded-md px-2.5 sm:px-3 py-1 text-xs min-w-0 transition group cursor-pointer text-left shadow-sm hover:shadow-cyan-500/10 focus:outline-none"
+          title="Click to select or switch target iOS application / process">
+          <!-- Status Dot -->
+          <div class="relative flex items-center justify-center shrink-0">
+            <span class="w-2 h-2 rounded-full" :class="session.pid ? 'bg-emerald-400' : (session.status && session.status.startsWith('Connection Failed') ? 'bg-red-400' : 'bg-amber-400')"></span>
+            <span class="absolute w-3.5 h-3.5 rounded-full pulse-ring" :class="session.pid ? 'bg-emerald-400' : (session.status && session.status.startsWith('Connection Failed') ? 'bg-red-400' : 'bg-amber-400')"></span>
+          </div>
+
+          <!-- Target App Name (Responsive max-width with ellipsis truncation) -->
+          <span class="text-white group-hover:text-cyan-300 font-mono font-semibold truncate max-w-[110px] sm:max-w-[180px] md:max-w-[260px]" :title="session.target">
+            {{ session.target }}
+          </span>
+
+          <!-- PID Badge (if available) -->
+          <span v-if="session.pid" class="text-[10px] text-emerald-400 font-mono bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.2 rounded shrink-0 hidden sm:inline">
+            PID:{{ session.pid }}
+          </span>
+          <span v-else-if="session.status && session.status.startsWith('Connection Failed')" class="text-[10px] text-red-400 font-mono bg-red-500/10 border border-red-500/30 px-1.5 py-0.2 rounded shrink-0 hidden sm:inline" :title="session.status">
+            Failed
+          </span>
+          <span v-else class="text-[10px] text-amber-400/90 font-mono shrink-0 animate-pulse hidden sm:inline">
+            Attaching...
+          </span>
+
+          <span class="text-gray-600 shrink-0 hidden md:inline">•</span>
+
+          <!-- Device Name -->
+          <span class="text-gray-400 font-mono text-[11px] truncate max-w-[120px] hidden md:inline" :title="session.device">
+            {{ session.device }}
+          </span>
+
+          <span class="text-gray-600 shrink-0">•</span>
+
+          <!-- Select Chevron Button -->
+          <div class="flex items-center space-x-1 text-cyan-400 group-hover:text-cyan-300 shrink-0 font-mono text-[10px]">
+            <span class="text-gray-400 group-hover:text-cyan-400 hidden xs:inline">Change</span>
+            <svg class="w-3 h-3 text-cyan-400 transition-transform group-hover:translate-y-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </div>
+        </button>
+      </div>
+
+      <!-- Right Section: Compact Consolidated Dropdowns Toolbar -->
+      <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
+        <!-- Event Count Badge -->
+        <div class="text-[11px] font-mono text-gray-400 bg-cyber-850 border border-cyber-border px-2 py-1 rounded hidden sm:block">
+          Events: <span class="text-cyan-400 font-bold">{{ filteredEvents.length }}</span><span class="text-gray-600">/</span>{{ events.length }}
+        </div>
+
+        <!-- 1. SECURITY & BYPASSES DROPDOWN -->
+        <div class="relative" @click.stop>
+          <button
+            @click="toggleDropdown('bypass')"
+            class="px-2 sm:px-2.5 py-1 text-xs font-mono rounded transition flex items-center space-x-1.5 border cursor-pointer"
+            :class="(bypasses.sslPinning || bypasses.jailbreak) ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-sm shadow-emerald-500/10' : 'bg-cyber-850 hover:bg-cyber-800 border-cyber-border text-gray-300'"
+            title="SSL Pinning & Jailbreak Detection Bypasses">
+            <span class="w-2 h-2 rounded-full" :class="(bypasses.sslPinning || bypasses.jailbreak) ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+            <span class="font-bold">Bypasses</span>
+            <svg class="w-3 h-3 text-gray-400 transition-transform" :class="showBypassMenu ? 'rotate-180' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+
+          <!-- Dropdown Popover Menu -->
+          <div
+            v-if="showBypassMenu"
+            class="absolute right-0 mt-1.5 w-68 bg-cyber-900 border border-cyber-border rounded-lg shadow-2xl p-2.5 z-50 text-xs font-mono space-y-2.5 glow-cyan animate-in fade-in duration-100">
+            <div class="flex items-center justify-between pb-1.5 border-b border-cyber-border text-[11px] text-gray-400">
+              <span class="font-bold uppercase tracking-wider text-cyan-400">Security Bypasses</span>
+              <span class="text-[10px] text-gray-500">Early Hooks</span>
+            </div>
+
+            <!-- SSL Pinning Row -->
+            <div class="flex items-center justify-between p-1.5 bg-cyber-950 rounded border border-cyber-border/70">
+              <div>
+                <div class="text-white font-semibold">SSL Pinning Bypass</div>
+                <div class="text-[10px] text-gray-400">BoringSSL, NSURLSession, SecTrust</div>
+              </div>
+              <button
+                @click="toggleBypass('sslPinning')"
+                class="px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center space-x-1"
+                :class="bypasses.sslPinning ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50' : 'bg-cyber-800 text-gray-400 border border-cyber-border hover:bg-cyber-750'">
+                <span>{{ bypasses.sslPinning ? 'ON' : 'OFF' }}</span>
+              </button>
+            </div>
+
+            <!-- Jailbreak Row -->
+            <div class="flex items-center justify-between p-1.5 bg-cyber-950 rounded border border-cyber-border/70">
+              <div>
+                <div class="text-white font-semibold">Jailbreak Detection</div>
+                <div class="text-[10px] text-gray-400">Filesystem, Dyld, Sysctl, Forks</div>
+              </div>
+              <button
+                @click="toggleBypass('jailbreak')"
+                class="px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center space-x-1"
+                :class="bypasses.jailbreak ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50' : 'bg-cyber-800 text-gray-400 border border-cyber-border hover:bg-cyber-750'">
+                <span>{{ bypasses.jailbreak ? 'ON' : 'OFF' }}</span>
+              </button>
+            </div>
+
+            <!-- Clean Relaunch (Spawn) Action -->
+            <button
+              @click="relaunchTargetApp(); showBypassMenu = false;"
+              class="w-full px-2.5 py-1.5 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 rounded font-bold transition flex items-center justify-center space-x-1.5">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+              </svg>
+              <span>Clean Relaunch (Spawn)</span>
+            </button>
+
+            <!-- Status Info Pills -->
+            <div class="pt-1.5 border-t border-cyber-border/70 text-[10px] text-gray-400 space-y-1">
+              <div class="flex items-center justify-between">
+                <span>QUIC (UDP 443) Blocker:</span>
+                <span class="text-emerald-400 font-bold">ACTIVE</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span>BoringSSL Coercion:</span>
+                <span class="text-cyan-400 font-bold">READY</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. PROXY & ROUTING DROPDOWN -->
+        <div class="relative" @click.stop>
+          <button
+            @click="toggleDropdown('proxy')"
+            class="px-2 sm:px-2.5 py-1 text-xs font-mono rounded transition flex items-center space-x-1.5 border cursor-pointer"
+            :class="proxy.enabled ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-sm shadow-amber-500/10' : 'bg-cyber-850 hover:bg-cyber-800 border-cyber-border text-gray-300'"
+            title="In-App Socket Proxy & Burp Suite Redirection">
+            <svg class="w-3.5 h-3.5 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+              <path d="M2 12h20"/>
+            </svg>
+            <span class="font-bold">Proxy</span>
+            <span class="text-[9px] px-1 rounded font-bold" :class="proxy.enabled ? 'bg-amber-500/40 text-white' : 'bg-gray-800 text-gray-500'">{{ proxy.enabled ? 'ON' : 'OFF' }}</span>
+            <svg class="w-3 h-3 text-gray-400 transition-transform" :class="showProxyMenu ? 'rotate-180' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+
+          <!-- Dropdown Popover Menu -->
+          <div
+            v-if="showProxyMenu"
+            class="absolute right-0 mt-1.5 w-72 bg-cyber-900 border border-cyber-border rounded-lg shadow-2xl p-2.5 z-50 text-xs font-mono space-y-2.5 glow-cyan animate-in fade-in duration-100">
+            <div class="flex items-center justify-between pb-1.5 border-b border-cyber-border text-[11px] text-gray-400">
+              <span class="font-bold uppercase tracking-wider text-amber-400">Socket Redirection</span>
+              <span class="text-[10px] text-gray-500">Transparent Hook</span>
+            </div>
+
+            <!-- Quick ON/OFF Toggle -->
+            <div class="flex items-center justify-between p-1.5 bg-cyber-950 rounded border border-cyber-border/70">
+              <div>
+                <div class="text-white font-semibold">Redirection Status</div>
+                <div class="text-[10px]" :class="proxy.enabled ? 'text-amber-400' : 'text-gray-400'">
+                  {{ proxy.enabled ? (proxy.host + ':' + proxy.port) : 'Direct (No Proxy)' }}
+                </div>
+              </div>
+              <button
+                @click="proxy.enabled = !proxy.enabled; saveProxyConfig();"
+                class="px-2.5 py-1 rounded text-[10px] font-bold transition flex items-center space-x-1"
+                :class="proxy.enabled ? 'bg-amber-500/30 text-amber-300 border border-amber-500/50' : 'bg-cyber-800 text-gray-400 border border-cyber-border hover:bg-cyber-750'">
+                <span>{{ proxy.enabled ? 'ENABLED' : 'DISABLED' }}</span>
+              </button>
+            </div>
+
+            <!-- Presets -->
+            <div class="space-y-1">
+              <span class="text-[10px] text-gray-400">Quick Presets:</span>
+              <div class="grid grid-cols-2 gap-1.5">
+                <button
+                  @click="proxy.host = '192.168.50.216'; proxy.port = 1337; saveProxyConfig();"
+                  class="px-2 py-1 bg-cyber-950 hover:bg-cyber-800 border border-cyber-border rounded text-[10px] text-amber-300 text-left transition">
+                  Burp (192.168.50.216:1337)
+                </button>
+                <button
+                  @click="proxy.host = '127.0.0.1'; proxy.port = 8080; saveProxyConfig();"
+                  class="px-2 py-1 bg-cyber-950 hover:bg-cyber-800 border border-cyber-border rounded text-[10px] text-gray-300 text-left transition">
+                  Localhost (127.0.0.1:8080)
+                </button>
+              </div>
+            </div>
+
+            <!-- Open Full Modal Button -->
+            <button
+              @click="openProxyModal(); showProxyMenu = false;"
+              class="w-full px-2 py-1 bg-cyber-800 hover:bg-cyber-750 border border-cyber-border text-cyan-300 rounded text-center text-[11px] transition">
+              Full Proxy Configuration...
+            </button>
+          </div>
+        </div>
+
+        <!-- 3. ACTIONS DROPDOWN -->
+        <div class="relative" @click.stop>
+          <button
+            @click="toggleDropdown('actions')"
+            class="px-2 sm:px-2.5 py-1 text-xs font-mono rounded transition flex items-center space-x-1.5 border cursor-pointer bg-cyber-850 hover:bg-cyber-800 border-cyber-border text-gray-300"
+            title="Session Actions & Export">
+            <svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span class="hidden xs:inline">Actions</span>
+            <svg class="w-3 h-3 text-gray-400 transition-transform" :class="showActionsMenu ? 'rotate-180' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+
+          <!-- Dropdown Popover Menu -->
+          <div
+            v-if="showActionsMenu"
+            class="absolute right-0 mt-1.5 w-56 bg-cyber-900 border border-cyber-border rounded-lg shadow-2xl p-2 z-50 text-xs font-mono space-y-1.5 glow-cyan animate-in fade-in duration-100">
+            <!-- Pause / Resume -->
+            <button
+              @click="togglePause(); showActionsMenu = false;"
+              class="w-full px-2.5 py-1.5 rounded flex items-center justify-between transition text-left"
+              :class="isPaused ? 'bg-amber-500/15 text-amber-300' : 'hover:bg-cyber-800 text-gray-300'">
+              <div class="flex items-center space-x-2">
+                <span class="w-2 h-2 rounded-full" :class="isPaused ? 'bg-amber-400' : 'bg-emerald-400'"></span>
+                <span>{{ isPaused ? 'Resume Stream' : 'Pause Stream' }}</span>
+              </div>
+              <kbd class="text-[10px] text-gray-500">F2</kbd>
+            </button>
+
+            <!-- Clear -->
+            <button
+              @click="clearEvents(); showActionsMenu = false;"
+              class="w-full px-2.5 py-1.5 hover:bg-cyber-800 rounded flex items-center justify-between text-gray-300 transition text-left">
+              <div class="flex items-center space-x-2">
+                <svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+                <span>Clear Events</span>
+              </div>
+              <kbd class="text-[10px] text-gray-500">F3</kbd>
+            </button>
+
+            <!-- Export -->
+            <button
+              @click="exportData('markdown'); showActionsMenu = false;"
+              class="w-full px-2.5 py-1.5 hover:bg-cyber-800 rounded flex items-center justify-between text-gray-300 transition text-left">
+              <div class="flex items-center space-x-2">
+                <svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span>Export Markdown</span>
+              </div>
+            </button>
+
+            <div class="h-px bg-cyber-border/70 my-1"></div>
+
+            <!-- Help -->
+            <button
+              @click="showHelpModal = true; showActionsMenu = false;"
+              class="w-full px-2.5 py-1.5 hover:bg-cyber-800 rounded flex items-center justify-between text-purple-300 transition text-left">
+              <div class="flex items-center space-x-2">
+                <span class="w-3.5 text-center font-bold">?</span>
+                <span>Shortcuts</span>
+              </div>
+              <kbd class="text-[10px] text-gray-500">?</kbd>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </header>
+
+    <!-- MAIN WORKSPACE CONTAINER WITH LEFT NAVIGATION RAIL -->
+    <div class="flex-1 flex overflow-hidden">
+
+      <!-- LEFT SIDEBAR NAVIGATION RAIL (Slim 54px cyber rail) -->
+      <aside class="w-13.5 min-w-[54px] max-w-[54px] bg-cyber-900 border-r border-cyber-border flex flex-col items-center py-2.5 select-none shrink-0 justify-between z-20">
+        <!-- Top Navigation Views -->
+        <div class="flex flex-col items-center space-y-2 w-full">
+          <!-- View 1: Trace (Events Stream) -->
+          <button
+            @click="navToView('events')"
+            class="w-10 h-10 rounded-lg flex flex-col items-center justify-center transition relative group cursor-pointer"
+            :class="currentNav === 'events' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/50 shadow-md shadow-cyan-500/10' : 'text-gray-400 hover:text-gray-200 hover:bg-cyber-800 border border-transparent'"
+            title="Live Events Stream & UI Trace">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+            </svg>
+            <span class="text-[9px] font-mono mt-0.5">Trace</span>
+            <span v-if="events.length" class="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+          </button>
+
+          <!-- View 2: Class Explorer -->
+          <button
+            @click="openClassExplorer()"
+            class="w-10 h-10 rounded-lg flex flex-col items-center justify-center transition relative group cursor-pointer"
+            :class="showClassModal ? 'bg-purple-500/20 text-purple-400 border border-purple-500/50' : 'text-gray-400 hover:text-gray-200 hover:bg-cyber-800 border border-transparent'"
+            title="Objective-C & Swift Class Explorer">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </svg>
+            <span class="text-[9px] font-mono mt-0.5">Classes</span>
+          </button>
+
+          <!-- View 3: Proxy & Network -->
+          <button
+            @click="openProxyModal()"
+            class="w-10 h-10 rounded-lg flex flex-col items-center justify-center transition relative group cursor-pointer"
+            :class="proxy.enabled ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-md shadow-amber-500/10' : 'text-gray-400 hover:text-gray-200 hover:bg-cyber-800 border border-transparent'"
+            title="In-App Socket Proxy & Burp Redirection">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+              <path d="M2 12h20"/>
+            </svg>
+            <span class="text-[9px] font-mono mt-0.5">Proxy</span>
+            <span v-if="proxy.enabled" class="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+          </button>
+
+          <!-- View 4: Live Hex Reader -->
+          <button
+            @click="navToTab('memory')"
+            class="w-10 h-10 rounded-lg flex flex-col items-center justify-center transition relative group cursor-pointer"
+            :class="(currentNav === 'events' && activeTab === 'memory') ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50' : 'text-gray-400 hover:text-gray-200 hover:bg-cyber-800 border border-transparent'"
+            title="Live Memory Hex Viewer (16-Byte Aligned)">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="2" width="20" height="20" rx="2" ry="2"/>
+              <path d="M7 10h10M7 14h10"/>
+            </svg>
+            <span class="text-[9px] font-mono mt-0.5">Hex</span>
+          </button>
+
+          <!-- View 5: REPL Console -->
+          <button
+            @click="navToTab('console')"
+            class="w-10 h-10 rounded-lg flex flex-col items-center justify-center transition relative group cursor-pointer"
+            :class="(currentNav === 'events' && activeTab === 'console') ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/50' : 'text-gray-400 hover:text-gray-200 hover:bg-cyber-800 border border-transparent'"
+            title="Frida JS REPL Interactive Console">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="4 17 10 11 4 5"/>
+              <line x1="12" y1="19" x2="20" y2="19"/>
+            </svg>
+            <span class="text-[9px] font-mono mt-0.5">REPL</span>
+          </button>
+
+          <!-- View 6: Logs -->
+          <button
+            @click="navToTab('logs')"
+            class="w-10 h-10 rounded-lg flex flex-col items-center justify-center transition relative group cursor-pointer"
+            :class="(currentNav === 'events' && activeTab === 'logs') ? 'bg-blue-500/20 text-blue-400 border border-blue-500/50' : 'text-gray-400 hover:text-gray-200 hover:bg-cyber-800 border border-transparent'"
+            title="Frida Agent & System Logs">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+            </svg>
+            <span class="text-[9px] font-mono mt-0.5">Logs</span>
+          </button>
+        </div>
+
+        <!-- Bottom Controls -->
+        <div class="flex flex-col items-center space-y-2 w-full pt-2 border-t border-cyber-border/50">
+          <!-- Quick Stream Live/Pause Status -->
+          <button
+            @click="togglePause()"
+            class="w-9 h-9 rounded-lg flex flex-col items-center justify-center transition text-gray-400 hover:text-white hover:bg-cyber-800 cursor-pointer"
+            :title="isPaused ? 'Stream Paused - Click to Resume (F2)' : 'Stream Live - Click to Pause (F2)'">
+            <span class="w-2 h-2 rounded-full" :class="isPaused ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'"></span>
+            <span class="text-[7.5px] font-mono mt-0.5">{{ isPaused ? 'PAUSE' : 'LIVE' }}</span>
+          </button>
+
+          <!-- Help Button -->
+          <button
+            @click="showHelpModal = true"
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-xs text-purple-400 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 transition cursor-pointer"
+            title="Shortcuts Cheat-Sheet (?)">
+            ?
+          </button>
+        </div>
+      </aside>
+
+      <!-- MAIN WORKBENCH (Filter Bar + Events Split View) -->
+      <div class="flex-1 flex flex-col min-w-0 max-w-full overflow-hidden">
+
+        <!-- FILTER & CATEGORY TOOLBAR -->
+        <div class="bg-cyber-900/90 border-b border-cyber-border px-3 sm:px-4 py-2 flex items-center justify-between gap-2 shrink-0 min-w-0 max-w-full">
+          <!-- Search Input -->
+          <div class="relative flex-1 min-w-[110px] max-w-[200px] sm:max-w-xs md:max-w-sm">
+            <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-gray-500">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+            </div>
+            <input
+              id="search-input"
+              ref="searchInput"
+              type="text"
+              v-model="searchQuery"
+              placeholder="Filter /regex/ or selector ('/' to focus)..."
+              class="w-full bg-cyber-950 border border-cyber-border focus:border-cyan-500 text-xs text-white rounded pl-8 pr-12 py-1.5 font-mono outline-none transition"
+            />
+            <div class="absolute inset-y-0 right-0 pr-2 flex items-center space-x-1">
+              <span v-if="searchQuery" @click="searchQuery = ''" class="cursor-pointer text-gray-500 hover:text-gray-300 text-xs px-1">✕</span>
+              <kbd class="text-[10px] text-gray-500 bg-cyber-800 px-1.5 py-0.5 rounded border border-cyber-border font-mono hidden xs:inline">/</kbd>
+            </div>
+          </div>
+
+          <!-- Category Filter: Responsive Model (Compact Dropdown on Narrow Screens, Pills on Wide Screens) -->
+          <div class="flex items-center space-x-1.5 min-w-0 shrink overflow-hidden">
+            <!-- Compact Category Dropdown (Active on narrow/split screens) -->
+            <div class="relative xl:hidden shrink-0" @click.stop>
+              <button
+                @click="toggleDropdown('categoryMenu')"
+                class="px-2 py-1 text-xs font-mono bg-cyber-850 hover:bg-cyber-800 border border-cyber-border rounded flex items-center space-x-1.5 transition cursor-pointer text-gray-300"
+                title="Filter by category">
+                <span class="text-gray-500 text-[10px]">Cat:</span>
+                <span class="font-bold text-cyan-400 truncate max-w-[80px]">{{ selectedCategory === 'ALL' ? 'ALL' : selectedCategory.replace('_', ' ').toUpperCase() }}</span>
+                <span class="text-[10px] px-1 py-0.2 rounded-full bg-cyber-750 text-gray-400 font-mono">
+                  {{ getCategoryCount(selectedCategory) }}
+                </span>
+                <span class="text-gray-500 text-[10px]">▾</span>
+              </button>
+
+              <!-- Category Menu Popup -->
+              <div
+                v-if="showCategoryMenu"
+                class="absolute right-0 top-full mt-1 w-52 bg-cyber-900 border border-cyber-border rounded-lg shadow-2xl p-1.5 z-50 text-xs font-mono space-y-1">
+                <button
+                  v-for="cat in categories"
+                  :key="cat.id"
+                  @click="selectedCategory = cat.id; showCategoryMenu = false"
+                  class="w-full px-2.5 py-1.5 rounded flex items-center justify-between text-left transition cursor-pointer"
+                  :class="selectedCategory === cat.id ? cat.activeClass : 'text-gray-300 hover:bg-cyber-800'">
+                  <span>{{ cat.label }}</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded-full" :class="selectedCategory === cat.id ? 'bg-black/30' : 'bg-cyber-800 text-gray-400'">
+                    {{ getCategoryCount(cat.id) }}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Full Category Pills (Shown on wide screens) -->
+            <div class="hidden xl:flex items-center space-x-1.5 overflow-x-auto text-[11px] font-mono scrollbar-none py-0.5 min-w-0">
+              <button
+                v-for="cat in categories"
+                :key="cat.id"
+                @click="toggleCategory(cat.id)"
+                class="px-2 py-0.5 rounded transition border flex items-center space-x-1 shrink-0 cursor-pointer"
+                :class="selectedCategory === cat.id ? cat.activeClass : 'bg-cyber-850 border-cyber-border text-gray-400 hover:text-gray-200 hover:bg-cyber-800'">
+                <span>{{ cat.label }}</span>
+                <span class="text-[10px] px-1 py-0.2 rounded-full" :class="selectedCategory === cat.id ? 'bg-black/30' : 'bg-cyber-750 text-gray-400'">
+                  {{ getCategoryCount(cat.id) }}
+                </span>
+              </button>
+            </div>
+
+            <div class="h-4 w-px bg-cyber-border mx-0.5 shrink-0"></div>
+
+            <!-- Pinned Filter Toggle -->
+            <button
+              @click="filterPinnedOnly = !filterPinnedOnly"
+              class="px-2 py-1 rounded transition border flex items-center space-x-1 shrink-0 font-mono text-xs cursor-pointer"
+              :class="filterPinnedOnly ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-cyber-850 border-cyber-border text-gray-400 hover:bg-cyber-800'">
+              <span :class="filterPinnedOnly ? 'text-amber-400' : 'text-gray-500'">★</span>
+              <span class="hidden sm:inline text-[11px]">Pinned</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- MAIN TWO-COLUMN SPLIT WORKSPACE -->
+        <div class="flex-1 flex overflow-hidden min-w-0 max-w-full">
+
+      <!-- LEFT COLUMN: VIRTUALIZED EVENT STREAM (Responsive 42% Width with min-w-0) -->
+      <div class="w-[42%] min-w-[220px] max-w-[50%] border-r border-cyber-border flex flex-col bg-cyber-950 min-w-0 overflow-hidden">
+        <!-- Event Table Header -->
+        <div class="bg-cyber-900 border-b border-cyber-border px-3 py-1.5 text-[11px] font-mono text-gray-400 flex items-center justify-between shrink-0 min-w-0 overflow-hidden">
+          <div class="flex items-center space-x-2 min-w-0 truncate">
+            <span class="w-4 text-center shrink-0">★</span>
+            <span class="w-7 shrink-0 text-center">Hits</span>
+            <span class="w-18 shrink-0">Category</span>
+            <span class="truncate">Selector / Target</span>
+          </div>
+          <div class="flex items-center space-x-2 shrink-0 text-right">
+            <span class="hidden md:inline">Latency</span>
+            <span>Time</span>
+          </div>
+        </div>
+
+        <!-- Event List Scrollable Area -->
+        <div class="flex-1 overflow-y-auto divide-y divide-cyber-border/40 font-mono text-xs select-none" id="event-list-container">
+          <div
+            v-for="(evt, idx) in filteredEvents"
+            :key="evt.id"
+            @click="selectEvent(evt, idx)"
+            class="px-2.5 sm:px-3 py-2 flex items-center justify-between cursor-pointer transition group border-l-2 min-w-0"
+            :class="selectedEvent && selectedEvent.id === evt.id
+              ? 'bg-cyber-800/90 border-cyan-400 shadow-inner'
+              : 'hover:bg-cyber-900/60 border-transparent'">
+
+            <div class="flex items-center space-x-2 overflow-hidden pr-1 min-w-0 flex-1">
+              <!-- Pin Toggle -->
+              <button @click.stop="togglePin(evt)" class="w-4 text-center text-sm transition hover:scale-125 shrink-0" :class="evt.pinned ? 'text-amber-400' : 'text-gray-600 group-hover:text-gray-400'">
+                {{ evt.pinned ? '★' : '☆' }}
+              </button>
+
+              <!-- Hit Count Badge -->
+              <span class="w-7 text-center text-[10px] font-semibold px-1 py-0.5 rounded bg-cyber-850 text-gray-400 border border-cyber-border shrink-0">
+                x{{ evt.hitCount || 1 }}
+              </span>
+
+              <!-- Category Badge -->
+              <span class="w-18 text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 rounded text-center shrink-0 border truncate"
+                :class="getCategoryBadgeClass(evt.category)">
+                {{ evt.category.replace('_', ' ') }}
+              </span>
+
+              <!-- Selector / Class -->
+              <div class="truncate min-w-0 flex-1">
+                <div class="text-white font-medium truncate flex items-center space-x-1">
+                  <span v-html="highlightSearch(evt.selector)"></span>
+                </div>
+                <div class="text-[10px] text-gray-400 truncate">
+                  {{ evt.targetClass }}
+                </div>
+              </div>
+            </div>
+
+            <!-- Right stats: latency & timestamp -->
+            <div class="text-right shrink-0 pl-1">
+              <div class="text-[10px] text-cyan-400 font-mono hidden md:block">
+                {{ evt.latency || '0.8ms' }}
+              </div>
+              <div class="text-[10px] text-gray-500 font-mono">
+                {{ evt.timestamp }}
+              </div>
+            </div>
+          </div>
+
+          <div v-if="filteredEvents.length === 0" class="h-64 flex flex-col items-center justify-center text-gray-500">
+            <svg class="w-8 h-8 mb-2 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="8" y1="12" x2="16" y2="12"></line>
+            </svg>
+            <p class="text-sm">No events matching current filter</p>
+            <button @click="resetFilters()" class="mt-2 text-xs text-cyan-400 hover:underline">Reset filters</button>
+          </div>
+        </div>
+
+        <!-- Table Status Footer -->
+        <div class="bg-cyber-900 border-t border-cyber-border px-3 py-1 flex items-center justify-between text-[11px] font-mono text-gray-400 shrink-0 min-w-0">
+          <div class="flex items-center space-x-1.5 truncate">
+            <span>Nav:</span>
+            <kbd class="bg-cyber-800 px-1 py-0.2 rounded border border-cyber-border text-gray-300">j</kbd>
+            <kbd class="bg-cyber-800 px-1 py-0.2 rounded border border-cyber-border text-gray-300">k</kbd>
+            <span class="text-gray-600">|</span>
+            <span>Pin:</span>
+            <kbd class="bg-cyber-800 px-1 py-0.2 rounded border border-cyber-border text-gray-300">p</kbd>
+            <span class="text-gray-600">|</span>
+            <span>Replay:</span>
+            <kbd class="bg-cyber-800 px-1 py-0.2 rounded border border-cyber-border text-gray-300">r</kbd>
+          </div>
+          <div class="text-gray-500 shrink-0">
+            <span class="text-emerald-400">● LIVE</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN: DETAIL WORKBENCH (Responsive Flex-1 with min-w-0) -->
+      <div class="flex-1 flex flex-col bg-cyber-900 overflow-hidden min-w-0">
+
+        <!-- DETAIL TABS HEADER (Core Event Tabs + Views Dropdown + Actions Dropdown) -->
+        <div class="bg-cyber-900 border-b border-cyber-border px-2 sm:px-3 pt-1.5 flex items-center justify-between shrink-0 gap-1.5 min-w-0 overflow-hidden">
+          <!-- Left: Tab Buttons & Views Selector -->
+          <div class="flex items-center space-x-1 min-w-0 flex-1 overflow-x-auto scrollbar-none py-0.5">
+            <!-- Core 4 Event Tabs -->
+            <button
+              v-for="tab in mainEventTabs"
+              :key="tab.id"
+              @click="activeTab = tab.id"
+              class="px-2 sm:px-2.5 py-1 text-xs font-mono font-medium rounded-t border-t border-x transition flex items-center space-x-1 shrink-0 cursor-pointer"
+              :class="activeTab === tab.id
+                ? 'bg-cyber-950 border-cyber-border border-b-transparent text-cyan-400 shadow-sm'
+                : 'bg-cyber-850/50 border-transparent text-gray-400 hover:text-gray-200 hover:bg-cyber-850'">
+              <span class="text-[10px] text-gray-500">{{ tab.shortcut }}</span>
+              <span>{{ tab.label }}</span>
+            </button>
+
+            <!-- Dynamic active tab badge if viewing memory, console, or logs -->
+            <button
+              v-if="['memory', 'console', 'logs'].includes(activeTab)"
+              class="px-2 sm:px-2.5 py-1 text-xs font-mono font-medium rounded-t border-t border-x bg-cyber-950 border-cyber-border border-b-transparent text-cyan-400 shadow-sm flex items-center space-x-1 shrink-0 cursor-pointer">
+              <span class="text-[10px] text-gray-500">
+                {{ activeTab === 'memory' ? '5' : (activeTab === 'console' ? '6' : '7') }}
+              </span>
+              <span>{{ activeTab === 'memory' ? 'Hex' : (activeTab === 'console' ? 'REPL' : 'Logs') }}</span>
+              <span @click.stop="activeTab = 'overview'" class="text-[10px] ml-1 text-gray-500 hover:text-gray-300" title="Close view">✕</span>
+            </button>
+
+            <!-- Views Dropdown Menu: Hex, REPL, Logs -->
+            <div class="relative shrink-0" @click.stop>
+              <button
+                @click="toggleDropdown('viewsMenu')"
+                class="px-2 py-1 text-xs font-mono rounded border transition flex items-center space-x-1 cursor-pointer"
+                :class="showViewsMenu ? 'bg-cyber-800 border-cyan-500/50 text-cyan-300' : 'bg-cyber-850/50 border-transparent text-gray-400 hover:text-gray-200 hover:bg-cyber-800'"
+                title="Open Hex, REPL Console, or Agent Logs">
+                <span>Views</span>
+                <span class="text-[10px] text-gray-500">▾</span>
+              </button>
+
+              <!-- Views Popup -->
+              <div
+                v-if="showViewsMenu"
+                class="absolute left-0 top-full mt-1 w-44 bg-cyber-900 border border-cyber-border rounded-lg shadow-2xl p-1.5 z-50 text-xs font-mono space-y-1">
+                <button
+                  @click="activeTab = 'memory'; fetchLiveHex(); showViewsMenu = false"
+                  class="w-full px-2.5 py-1.5 rounded flex items-center justify-between text-left hover:bg-cyber-800 transition cursor-pointer"
+                  :class="activeTab === 'memory' ? 'text-cyan-400 bg-cyber-800/80 font-bold' : 'text-gray-300'">
+                  <span class="flex items-center space-x-2">
+                    <span class="text-[10px] text-gray-500">5</span>
+                    <span>Memory Hex</span>
+                  </span>
+                  <span class="text-[10px] text-emerald-400">16B</span>
+                </button>
+                <button
+                  @click="activeTab = 'console'; showViewsMenu = false"
+                  class="w-full px-2.5 py-1.5 rounded flex items-center justify-between text-left hover:bg-cyber-800 transition cursor-pointer"
+                  :class="activeTab === 'console' ? 'text-cyan-400 bg-cyber-800/80 font-bold' : 'text-gray-300'">
+                  <span class="flex items-center space-x-2">
+                    <span class="text-[10px] text-gray-500">6</span>
+                    <span>REPL Console</span>
+                  </span>
+                  <span class="text-[10px] text-cyan-400">JS</span>
+                </button>
+                <button
+                  @click="activeTab = 'logs'; showViewsMenu = false"
+                  class="w-full px-2.5 py-1.5 rounded flex items-center justify-between text-left hover:bg-cyber-800 transition cursor-pointer"
+                  :class="activeTab === 'logs' ? 'text-cyan-400 bg-cyber-800/80 font-bold' : 'text-gray-300'">
+                  <span class="flex items-center space-x-2">
+                    <span class="text-[10px] text-gray-500">7</span>
+                    <span>Agent Logs</span>
+                  </span>
+                  <span class="text-[10px] text-blue-400">LOG</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Tab Action Controls (Replay + Actions Dropdown) -->
+          <div class="flex items-center space-x-1.5 pb-1 shrink-0">
+            <!-- Replay Button (Always visible and unclipped) -->
+            <button
+              @click="triggerReplay()"
+              class="px-2.5 py-1 text-xs font-mono bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold rounded flex items-center space-x-1 whitespace-nowrap cursor-pointer transition shadow-sm"
+              title="Replay handler on iOS main queue (r)">
+              <span>⚡ Replay (r)</span>
+            </button>
+
+            <!-- Actions Dropdown -->
+            <div class="relative shrink-0" @click.stop>
+              <button
+                @click="toggleDropdown('tabActions')"
+                class="px-2 py-1 text-xs font-mono bg-cyber-800 hover:bg-cyber-750 border border-cyber-border text-gray-200 rounded flex items-center space-x-1 whitespace-nowrap cursor-pointer transition">
+                <span>Actions</span>
+                <span class="text-[10px] text-gray-400">▾</span>
+              </button>
+
+              <!-- Actions Menu Popup -->
+              <div
+                v-if="showTabActionsMenu"
+                class="absolute right-0 top-full mt-1 w-56 bg-cyber-900 border border-cyber-border rounded-lg shadow-2xl p-1.5 z-50 text-xs font-mono space-y-1">
+                <!-- Quick Copy Disassembler (c) -->
+                <button
+                  @click="openQuickCopyModal(); showTabActionsMenu = false"
+                  class="w-full px-2.5 py-1.5 rounded flex items-center justify-between text-left text-cyan-300 hover:bg-cyber-800 transition cursor-pointer">
+                  <span class="flex items-center space-x-2">
+                    <span>📋 Quick Copy Jumps</span>
+                  </span>
+                  <kbd class="text-[10px] bg-cyber-950 px-1.5 py-0.5 rounded border border-cyber-border text-gray-400">c</kbd>
+                </button>
+
+                <!-- Export Hook Script -->
+                <button
+                  @click="exportHookScript(); showTabActionsMenu = false"
+                  class="w-full px-2.5 py-1.5 rounded flex items-center justify-between text-left text-purple-300 hover:bg-cyber-800 transition cursor-pointer">
+                  <span class="flex items-center space-x-2">
+                    <span>📦 Export Hook Script</span>
+                  </span>
+                  <span class="text-[10px] text-purple-400 font-mono">.js</span>
+                </button>
+
+                <div class="h-px bg-cyber-border/60 my-1"></div>
+                <div class="text-[10px] text-gray-500 px-2.5 py-0.5 font-bold uppercase tracking-wider">Disassembler Quick Jumps</div>
+
+                <!-- Direct Jumps -->
+                <button
+                  @click="copyJumpCommand('ida'); showTabActionsMenu = false"
+                  class="w-full px-2.5 py-1 rounded flex items-center justify-between text-left text-gray-300 hover:bg-cyber-800 transition cursor-pointer">
+                  <span>IDA Pro Jump</span>
+                  <span class="text-[10px] text-cyan-400">G</span>
+                </button>
+                <button
+                  @click="copyJumpCommand('ghidra'); showTabActionsMenu = false"
+                  class="w-full px-2.5 py-1 rounded flex items-center justify-between text-left text-gray-300 hover:bg-cyber-800 transition cursor-pointer">
+                  <span>Ghidra Jump</span>
+                  <span class="text-[10px] text-emerald-400">G</span>
+                </button>
+                <button
+                  @click="copyJumpCommand('hopper'); showTabActionsMenu = false"
+                  class="w-full px-2.5 py-1 rounded flex items-center justify-between text-left text-gray-300 hover:bg-cyber-800 transition cursor-pointer">
+                  <span>Hopper Jump</span>
+                  <span class="text-[10px] text-amber-400">⌥G</span>
+                </button>
+                <button
+                  @click="copyJumpCommand('lldb'); showTabActionsMenu = false"
+                  class="w-full px-2.5 py-1 rounded flex items-center justify-between text-left text-gray-300 hover:bg-cyber-800 transition cursor-pointer">
+                  <span>LLDB Breakpoint</span>
+                  <span class="text-[10px] text-rose-400">br s</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB CONTENT AREA -->
+        <div class="flex-1 overflow-y-auto p-4 bg-cyber-950 font-mono text-xs text-gray-300">
+
+          <div v-if="!selectedEvent" class="h-full flex flex-col items-center justify-center text-gray-500">
+            <p>Select an event from the left list to inspect details</p>
+          </div>
+
+          <div v-else>
+            <!-- TAB 1: OVERVIEW & DISASSEMBLER JUMPS -->
+            <div v-if="activeTab === 'overview'" class="space-y-4">
+              <!-- Method Card -->
+              <div class="bg-cyber-900 border border-cyber-border rounded-lg p-3.5 space-y-2.5">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs uppercase font-bold text-gray-400 tracking-wider">Method Signature</span>
+                  <span class="text-[10px] px-2 py-0.5 rounded font-bold" :class="selectedEvent.location.isApp ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-gray-700/30 text-gray-400 border border-gray-700'">
+                    {{ selectedEvent.location.isApp ? 'APP TARGET' : 'SYSTEM FRAMEWORK' }}
+                  </span>
+                </div>
+                <div class="text-sm font-bold text-cyan-300 select-text break-all">
+                  -[{{ selectedEvent.targetClass }} {{ selectedEvent.selector }}]
+                </div>
+                <div v-if="selectedEvent.swiftDemangled" class="text-xs text-purple-300 bg-cyber-950 p-2 rounded border border-cyber-border select-text">
+                  <div class="text-[10px] text-gray-500 mb-0.5">Demangled Swift Symbol:</div>
+                  {{ selectedEvent.swiftDemangled }}
+                </div>
+              </div>
+
+              <!-- Quick Jump Disassembler Toolbar -->
+              <div class="bg-cyber-900 border border-cyber-border rounded-lg p-3.5 space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs uppercase font-bold text-gray-400 tracking-wider">Disassembler Jump Actions</span>
+                  <span class="text-[10px] text-cyan-400">Click to Copy Command & Sync</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                  <!-- IDA PRO BUTTON -->
+                  <button @click="copyJumpCommand('ida')" class="p-2 bg-cyber-950 hover:bg-cyber-850 border border-cyan-500/30 hover:border-cyan-400 rounded text-left transition flex items-center justify-between group">
+                    <div>
+                      <div class="text-cyan-400 font-bold text-xs flex items-center space-x-1.5">
+                        <span>IDA Pro Jump</span>
+                        <span class="text-[10px] text-gray-500 font-normal">G -> toEA</span>
+                      </div>
+                      <div class="text-[11px] text-gray-400 truncate mt-0.5">
+                        {{ selectedEvent.location.implementation }}
+                      </div>
+                    </div>
+                    <span class="text-gray-600 group-hover:text-cyan-400 text-sm">➔</span>
+                  </button>
+
+                  <!-- GHIDRA BUTTON -->
+                  <button @click="copyJumpCommand('ghidra')" class="p-2 bg-cyber-950 hover:bg-cyber-850 border border-purple-500/30 hover:border-purple-400 rounded text-left transition flex items-center justify-between group">
+                    <div>
+                      <div class="text-purple-400 font-bold text-xs flex items-center space-x-1.5">
+                        <span>Ghidra Jump</span>
+                        <span class="text-[10px] text-gray-500 font-normal">toAddr()</span>
+                      </div>
+                      <div class="text-[11px] text-gray-400 truncate mt-0.5">
+                        toAddr({{ selectedEvent.location.implementation }})
+                      </div>
+                    </div>
+                    <span class="text-gray-600 group-hover:text-purple-400 text-sm">➔</span>
+                  </button>
+
+                  <!-- HOPPER BUTTON -->
+                  <button @click="copyJumpCommand('hopper')" class="p-2 bg-cyber-950 hover:bg-cyber-850 border border-amber-500/30 hover:border-amber-400 rounded text-left transition flex items-center justify-between group">
+                    <div>
+                      <div class="text-amber-400 font-bold text-xs flex items-center space-x-1.5">
+                        <span>Hopper Jump</span>
+                        <span class="text-[10px] text-gray-500 font-normal">G</span>
+                      </div>
+                      <div class="text-[11px] text-gray-400 truncate mt-0.5">
+                        {{ selectedEvent.location.offset }}
+                      </div>
+                    </div>
+                    <span class="text-gray-600 group-hover:text-amber-400 text-sm">➔</span>
+                  </button>
+
+                  <!-- LLDB BUTTON -->
+                  <button @click="copyJumpCommand('lldb')" class="p-2 bg-cyber-950 hover:bg-cyber-850 border border-emerald-500/30 hover:border-emerald-400 rounded text-left transition flex items-center justify-between group">
+                    <div>
+                      <div class="text-emerald-400 font-bold text-xs flex items-center space-x-1.5">
+                        <span>LLDB Breakpoint</span>
+                        <span class="text-[10px] text-gray-500 font-normal">br s -a</span>
+                      </div>
+                      <div class="text-[11px] text-gray-400 truncate mt-0.5">
+                        br s -a {{ selectedEvent.location.implementation }}
+                      </div>
+                    </div>
+                    <span class="text-gray-600 group-hover:text-emerald-400 text-sm">➔</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Binary & Memory Mapping Grid -->
+              <div class="bg-cyber-900 border border-cyber-border rounded-lg p-3.5 space-y-2">
+                <span class="text-xs uppercase font-bold text-gray-400 tracking-wider">Binary & Offset Mapping</span>
+                <div class="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <span class="text-gray-500 text-[10px]">IMPLEMENTATION PC</span>
+                    <div class="text-cyan-400 font-bold select-text">{{ selectedEvent.location.implementation }}</div>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 text-[10px]">FILE / MACH-O OFFSET</span>
+                    <div class="text-emerald-400 font-bold select-text">{{ selectedEvent.location.offset }}</div>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 text-[10px]">MODULE NAME</span>
+                    <div class="text-gray-200 select-text">{{ selectedEvent.location.moduleName }}</div>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 text-[10px]">MODULE BASE ADDRESS</span>
+                    <div class="text-gray-400 select-text">{{ selectedEvent.location.moduleBase }}</div>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 text-[10px]">RECEIVER INSTANCE POINTER</span>
+                    <div class="text-purple-400 font-bold select-text">{{ selectedEvent.targetPointer }}</div>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 text-[10px]">ACTION TYPE</span>
+                    <div class="text-yellow-400 font-bold select-text">{{ selectedEvent.actionType }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- UI Hierarchy Tree (if available) -->
+              <div v-if="selectedEvent.sender && selectedEvent.sender.hierarchy" class="bg-cyber-900 border border-cyber-border rounded-lg p-3.5 space-y-2">
+                <span class="text-xs uppercase font-bold text-gray-400 tracking-wider">UI View Hierarchy</span>
+                <div class="space-y-1 pl-1">
+                  <div v-for="(h, i) in selectedEvent.sender.hierarchy" :key="i" class="flex items-center space-x-2 text-xs">
+                    <span class="text-gray-600 font-mono">{{ '  '.repeat(i) }}└─</span>
+                    <span class="text-gray-300" :class="i === selectedEvent.sender.hierarchy.length - 1 ? 'text-cyan-400 font-bold' : ''">{{ h }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB 2: CALL STACK (APP VS SYS) -->
+            <div v-if="activeTab === 'backtrace'" class="space-y-2">
+              <div class="flex items-center justify-between pb-1">
+                <span class="text-xs uppercase font-bold text-gray-400 tracking-wider">Hierarchical Backtrace</span>
+                <div class="flex items-center space-x-2 text-[10px]">
+                  <span class="flex items-center space-x-1"><span class="w-2 h-2 rounded-full bg-emerald-400"></span><span class="text-emerald-400 font-bold">APP</span></span>
+                  <span class="flex items-center space-x-1"><span class="w-2 h-2 rounded-full bg-gray-500"></span><span class="text-gray-400">SYS</span></span>
+                </div>
+              </div>
+
+              <div class="space-y-1.5">
+                <div
+                  v-for="frame in selectedEvent.backtrace.frames"
+                  :key="frame.index"
+                  class="p-2.5 rounded border transition"
+                  :class="frame.isApp
+                    ? 'bg-cyber-850/80 border-emerald-500/40 hover:border-emerald-400 shadow-sm'
+                    : 'bg-cyber-900/50 border-cyber-border/80 text-gray-400'">
+                  <div class="flex items-center justify-between mb-1">
+                    <div class="flex items-center space-x-2">
+                      <span class="text-gray-500 font-bold text-[10px]">#{{ frame.index }}</span>
+                      <span class="text-[10px] font-bold px-1.5 py-0.2 rounded"
+                        :class="frame.isApp ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'bg-gray-800 text-gray-400'">
+                        {{ frame.isApp ? 'APP' : 'SYS' }}
+                      </span>
+                      <span class="font-bold" :class="frame.isApp ? 'text-white' : 'text-gray-300'">{{ frame.moduleName }}</span>
+                      <span class="text-gray-500 text-[10px]">+{{ frame.offset }}</span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                      <span class="text-cyan-400 font-mono text-[11px]">{{ frame.address }}</span>
+                      <button @click="copyText(frame.address)" class="text-gray-500 hover:text-gray-300 text-[10px]">Copy</button>
+                    </div>
+                  </div>
+                  <div class="text-xs break-all select-text font-medium" :class="frame.isApp ? 'text-emerald-300' : 'text-gray-400'">
+                    {{ frame.symbol }}
+                  </div>
+                  <div v-if="frame.file" class="text-[10px] text-gray-500 mt-1 flex items-center space-x-1">
+                    <span>Source:</span>
+                    <span class="text-gray-400">{{ frame.file }}:{{ frame.line }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB 3: ARGUMENTS & TAMPER REPLAY -->
+            <div v-if="activeTab === 'arguments'" class="space-y-4">
+              <div class="bg-cyber-900 border border-cyber-border rounded-lg p-3.5 space-y-3">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs uppercase font-bold text-gray-400 tracking-wider">Decoded Handler Parameters</span>
+                  <span class="text-[10px] text-gray-500">ARM64 ABI: x0=self, x1=_cmd, x2...=args</span>
+                </div>
+
+                <div class="divide-y divide-cyber-border">
+                  <div class="py-2 flex items-start justify-between">
+                    <div>
+                      <div class="text-[10px] text-cyan-400 font-bold">x0 (self / instance)</div>
+                      <div class="text-xs text-white select-text font-bold">{{ selectedEvent.targetPointer }}</div>
+                      <div class="text-[10px] text-gray-400">&lt;{{ selectedEvent.targetClass }}: {{ selectedEvent.targetPointer }}&gt;</div>
+                    </div>
+                    <span class="text-[10px] bg-cyber-800 text-gray-400 px-2 py-0.5 rounded border border-cyber-border">id (Pointer)</span>
+                  </div>
+
+                  <div class="py-2 flex items-start justify-between">
+                    <div>
+                      <div class="text-[10px] text-cyan-400 font-bold">x1 (_cmd / selector)</div>
+                      <div class="text-xs text-white select-text font-bold">{{ selectedEvent.selector }}</div>
+                      <div class="text-[10px] text-gray-400">@selector({{ selectedEvent.selector }})</div>
+                    </div>
+                    <span class="text-[10px] bg-cyber-800 text-gray-400 px-2 py-0.5 rounded border border-cyber-border">SEL</span>
+                  </div>
+
+                  <div class="py-2 flex items-start justify-between">
+                    <div>
+                      <div class="text-[10px] text-cyan-400 font-bold">x2 (sender / sender object)</div>
+                      <div class="text-xs text-white select-text font-bold">
+                        {{ selectedEvent.sender ? selectedEvent.sender.className : '0x0 (nil)' }}
+                      </div>
+                      <div class="text-[10px] text-gray-400" v-if="selectedEvent.sender">
+                        title: "{{ selectedEvent.sender.title }}", tag: {{ selectedEvent.sender.tag }}
+                      </div>
+                    </div>
+                    <span class="text-[10px] bg-cyber-800 text-gray-400 px-2 py-0.5 rounded border border-cyber-border">id (UIButton*)</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tamper & Replay Interactive Section -->
+              <div class="bg-cyber-900 border border-cyber-border rounded-lg p-3.5 space-y-3">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs uppercase font-bold text-amber-400 tracking-wider">Interactive Tamper & Replay</span>
+                  <span class="text-[10px] text-gray-500">Frida RPC Dynamic Invocation</span>
+                </div>
+
+                <div class="space-y-2">
+                  <div>
+                    <label class="text-[10px] text-gray-400 block mb-1">Mutate Parameter (JSON / String / Value):</label>
+                    <input type="text" v-model="tamperValue" class="w-full bg-cyber-950 border border-cyber-border focus:border-amber-400 text-xs text-white p-2 rounded outline-none font-mono" placeholder='{"tag": 999, "amount": 0}' />
+                  </div>
+                  <div class="flex items-center justify-end space-x-2 pt-1">
+                    <button @click="triggerTamperReplay()" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-black font-bold text-xs rounded transition flex items-center space-x-1.5 shadow-lg shadow-amber-500/20">
+                      <span>⚡ Replay Mutated via Frida RPC</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB 4: ARM64 DISASSEMBLY VIEWER -->
+            <div v-if="activeTab === 'disassembly'" class="space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs uppercase font-bold text-gray-400 tracking-wider">ARM64 Implementation Disassembly</span>
+                <span class="text-[10px] text-cyan-400">{{ selectedEvent.location.disassembly ? selectedEvent.location.disassembly.length : 0 }} instructions decompiled</span>
+              </div>
+
+              <div class="bg-cyber-900 border border-cyber-border rounded-lg p-3 overflow-x-auto space-y-1">
+                <div
+                  v-for="(insn, i) in (selectedEvent.location.disassembly || [])"
+                  :key="i"
+                  class="flex items-center space-x-4 py-0.5 px-2 rounded hover:bg-cyber-800/60 group">
+                  <!-- Branch Indicator / Arrow -->
+                  <span class="w-3 text-cyan-400 text-xs">
+                    {{ insn.mnemonic.startsWith('b') ? '↳' : (i === 0 ? '▶' : ' ') }}
+                  </span>
+                  <!-- Instruction Address -->
+                  <span class="text-gray-500 select-text w-28">{{ insn.address }}</span>
+                  <!-- Mnemonic -->
+                  <span class="w-16 font-bold" :class="insn.mnemonic.startsWith('b') ? 'asm-branch' : 'asm-mnemonic'">
+                    {{ insn.mnemonic }}
+                  </span>
+                  <!-- Formatted Operands with Syntax Highlighting -->
+                  <span class="flex-1 select-text" v-html="formatAsmOperands(insn.opStr)"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB 5: FRIDA LOGS STREAM -->
+            <div v-if="activeTab === 'logs'" class="space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs uppercase font-bold text-gray-400 tracking-wider">Frida Agent Logs</span>
+                <button @click="logs = []" class="text-[10px] text-gray-500 hover:text-gray-300">Clear Logs</button>
+              </div>
+
+              <div class="bg-cyber-950 border border-cyber-border rounded-lg p-3 h-80 overflow-y-auto space-y-1 font-mono text-[11px]">
+                <div v-for="(log, i) in logs" :key="i" class="flex items-start space-x-2">
+                  <span class="text-gray-600 select-none">{{ log.time }}</span>
+                  <span class="font-bold text-[9px] px-1 py-0.2 rounded" :class="getLogLevelClass(log.level)">{{ log.level }}</span>
+                  <span class="text-gray-300 select-text">{{ log.message }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB 6: 16-BYTE ALIGNED LIVE HEX MEMORY INSPECTOR -->
+            <div v-if="activeTab === 'memory'" class="space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs uppercase font-bold text-gray-400 tracking-wider">Live Memory Hex Viewer (16-Byte Aligned)</span>
+                <span class="text-[10px] text-cyan-400">Read directly from ARM64 process memory via Frida RPC</span>
+              </div>
+
+              <!-- Address Bar & Live Fetch Controls -->
+              <div class="flex items-center space-x-2 bg-cyber-900 border border-cyber-border rounded-lg p-2 font-mono text-xs">
+                <span class="text-gray-400 text-[11px] shrink-0">Address:</span>
+                <input
+                  type="text"
+                  v-model="hexAddressInput"
+                  @keydown.enter="fetchLiveHex(hexAddressInput)"
+                  placeholder="0x104A1B240"
+                  class="flex-1 bg-cyber-950 border border-cyber-border focus:border-cyan-400 text-cyan-300 px-2.5 py-1 rounded text-xs outline-none"
+                />
+                <button
+                  @click="fetchLiveHex(hexAddressInput)"
+                  class="px-3 py-1 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 rounded font-bold text-xs flex items-center space-x-1 shrink-0"
+                  :disabled="hexLoading">
+                  <span v-if="hexLoading" class="animate-spin inline-block">↻</span>
+                  <span>{{ hexLoading ? 'Reading...' : 'Read Live Memory' }}</span>
+                </button>
+              </div>
+
+              <!-- Error State -->
+              <div v-if="hexError" class="p-2.5 bg-red-500/10 border border-red-500/30 text-red-400 rounded text-xs font-mono">
+                {{ hexError }}
+              </div>
+
+              <!-- Floating Data Inspector HUD -->
+              <div class="bg-cyber-900 border border-cyber-border rounded-lg p-2.5 flex items-center justify-between text-[11px]">
+                <div class="flex items-center space-x-4">
+                  <div>
+                    <span class="text-gray-500 text-[10px] block">ADDRESS</span>
+                    <span class="text-cyan-400 font-bold">{{ hoveredByte.address || hexAddressInput || (selectedEvent && selectedEvent.location && selectedEvent.location.implementation) || '0x0' }}</span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 text-[10px] block">HEX / UINT8</span>
+                    <span class="text-white font-bold">{{ hoveredByte.hex || '0x00' }} ({{ hoveredByte.u8 || '0' }})</span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 text-[10px] block">UINT32 (LE)</span>
+                    <span class="text-emerald-400 font-bold">{{ hoveredByte.u32 || '0x00000000' }}</span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 text-[10px] block">ASCII CHAR</span>
+                    <span class="text-amber-400 font-bold font-mono">'{{ hoveredByte.ascii || '.' }}'</span>
+                  </div>
+                </div>
+                <div class="text-[10px] text-gray-400 bg-cyber-950 px-2 py-1 rounded border border-cyber-border">
+                  Source: <span class="text-purple-400">Frida RPC Memory Reader</span>
+                </div>
+              </div>
+
+              <!-- Hex Grid -->
+              <div class="bg-cyber-900 border border-cyber-border rounded-lg p-3 overflow-x-auto font-mono text-xs">
+                <!-- Header Offsets -->
+                <div class="flex items-center text-gray-500 text-[11px] pb-1 border-b border-cyber-border/60 mb-2">
+                  <span class="w-28">Offset</span>
+                  <div class="flex space-x-1 pl-2">
+                    <span v-for="b in 16" :key="b" class="w-6 text-center" :class="b === 8 ? 'mr-2' : ''">
+                      {{ (b-1).toString(16).toUpperCase().padStart(2, '0') }}
+                    </span>
+                  </div>
+                  <span class="pl-4">ASCII</span>
+                </div>
+
+                <!-- Hex Rows -->
+                <div class="space-y-1">
+                  <div v-if="!hexRows.length && !hexLoading" class="text-gray-500 py-3 text-center">
+                    Click "Read Live Memory" to inspect process bytes at this address
+                  </div>
+                  <div v-for="(row, rIdx) in hexRows" :key="rIdx" class="flex items-center hover:bg-cyber-850/60 py-0.5 rounded">
+                    <!-- Offset -->
+                    <span class="w-28 text-cyan-500 select-text">{{ row.offset }}</span>
+
+                    <!-- 16 Bytes -->
+                    <div class="flex space-x-1 pl-2">
+                      <span
+                        v-for="(byteVal, bIdx) in row.bytes"
+                        :key="bIdx"
+                        @mouseenter="inspectByte(row.offset, bIdx, byteVal)"
+                        class="hex-byte text-gray-300"
+                        :class="[
+                          byteVal === '00' ? 'text-gray-600' : 'text-white',
+                          bIdx === 7 ? 'mr-2' : ''
+                        ]">
+                        {{ byteVal }}
+                      </span>
+                    </div>
+
+                    <!-- ASCII Column -->
+                    <span class="pl-4 text-gray-400 font-mono select-text tracking-widest">
+                      {{ row.ascii }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB 7: LIVE IN-APP FRIDA REPL CONSOLE -->
+            <div v-if="activeTab === 'console'" class="space-y-3 flex flex-col h-[520px]">
+              <div class="flex items-center justify-between shrink-0">
+                <div class="flex items-center space-x-2">
+                  <span class="text-xs uppercase font-bold text-emerald-400 tracking-wider">Live Frida REPL Console</span>
+                  <span class="text-[10px] text-gray-500">ARM64 Target Context</span>
+                </div>
+                <button @click="consoleHistory = []" class="text-[10px] text-gray-500 hover:text-gray-300">Clear Terminal</button>
+              </div>
+
+              <!-- Terminal Output Box -->
+              <div id="console-output-box" class="flex-1 bg-cyber-950 border border-cyber-border rounded-lg p-3 overflow-y-auto space-y-1.5 font-mono text-xs select-text">
+                <div v-for="(item, idx) in consoleHistory" :key="idx" class="break-all leading-relaxed">
+                  <div v-if="item.type === 'system'" class="text-purple-400 font-bold">
+                    [System] {{ item.text }}
+                  </div>
+                  <div v-else-if="item.type === 'input'" class="text-cyan-400 flex items-start space-x-1">
+                    <span class="text-gray-500 select-none">&gt;&gt;&gt;</span>
+                    <span class="font-bold">{{ item.text }}</span>
+                  </div>
+                  <div v-else-if="item.type === 'output'" class="text-emerald-300 bg-cyber-900/60 p-1.5 rounded border border-cyber-border/40 whitespace-pre-wrap">
+                    {{ item.text }}
+                  </div>
+                  <div v-else-if="item.type === 'error'" class="text-rose-400 bg-rose-500/10 p-1.5 rounded border border-rose-500/30 whitespace-pre-wrap">
+                    {{ item.text }}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Command Prompt Input -->
+              <div class="flex items-center space-x-2 bg-cyber-900 border border-cyber-border rounded-lg p-2 shrink-0">
+                <span class="text-cyan-400 font-mono font-bold pl-1">&gt;</span>
+                <input
+                  type="text"
+                  v-model="consoleInput"
+                  @keydown.enter="evalConsoleCommand()"
+                  placeholder="e.g. Process.mainModule.base or ObjC.classes.UIApplication"
+                  class="flex-1 bg-cyber-950 border border-cyber-border focus:border-cyan-400 text-white px-2 py-1 rounded text-xs font-mono outline-none"
+                  :disabled="consoleLoading"
+                />
+                <button
+                  @click="evalConsoleCommand()"
+                  class="px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 rounded font-bold text-xs flex items-center space-x-1"
+                  :disabled="consoleLoading || !consoleInput.trim()">
+                  <span v-if="consoleLoading" class="animate-spin inline-block">↻</span>
+                  <span>Execute</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <!-- TARGET APPLICATION SELECTOR MODAL -->
+    <div v-if="showAppModal" class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center z-50 p-4" @click.self="showAppModal = false">
+      <div class="bg-cyber-900 border border-cyber-border rounded-xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh] glow-cyan">
+
+        <!-- Modal Header -->
+        <div class="px-5 py-3.5 bg-cyber-850 border-b border-cyber-border flex items-center justify-between shrink-0">
+          <div class="flex items-center space-x-2.5">
+            <div class="w-7 h-7 rounded-lg bg-cyan-500/15 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+            </div>
+            <div>
+              <div class="text-sm font-bold text-white font-mono flex items-center space-x-2">
+                <span>Select Target iOS Application</span>
+                <span class="text-[10px] text-gray-500 font-normal font-sans">[ESC to close]</span>
+              </div>
+              <div class="text-[11px] text-gray-400 font-mono">
+                Attach to a running process or spawn an installed app on {{ session.device }}
+              </div>
+            </div>
+          </div>
+          <button @click="showAppModal = false" class="text-gray-500 hover:text-white p-1 rounded hover:bg-cyber-800 transition">✕</button>
+        </div>
+
+        <!-- Filter & Search Toolbar -->
+        <div class="p-4 border-b border-cyber-border space-y-3 bg-cyber-950/70 shrink-0">
+          <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-500">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+            </div>
+            <input
+              type="text"
+              v-model="appsSearchQuery"
+              placeholder="Search apps by name, bundle ID, or PID..."
+              class="w-full bg-cyber-900 border border-cyber-border focus:border-cyan-500 text-xs text-white rounded pl-9 pr-24 py-2 font-mono outline-none transition"
+              @keydown.enter="manualAttachFirstMatch()"
+            />
+            <div class="absolute inset-y-0 right-0 pr-2 flex items-center space-x-1.5">
+              <button
+                @click="fetchAvailableApps(true)"
+                class="text-[11px] font-mono text-cyan-400 hover:text-cyan-300 px-2.5 py-1 rounded bg-cyber-800 hover:bg-cyber-750 border border-cyber-border transition flex items-center space-x-1"
+                :class="appsLoading ? 'opacity-50 pointer-events-none' : ''"
+                title="Rescan device for apps">
+                <span :class="appsLoading ? 'animate-spin inline-block' : ''">↻</span>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Filters: Apps / Running / All Processes -->
+          <div class="flex items-center justify-between text-xs font-mono">
+            <div class="flex items-center space-x-2">
+              <button
+                @click="appsFilterTab = 'apps'"
+                class="px-2.5 py-1 rounded transition border text-[11px] flex items-center space-x-1"
+                :class="appsFilterTab === 'apps' ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300' : 'bg-cyber-900 border-cyber-border text-gray-400 hover:text-gray-200'">
+                <span>Apps ({{ appsCount }})</span>
+              </button>
+              <button
+                @click="appsFilterTab = 'running'"
+                class="px-2.5 py-1 rounded transition border text-[11px] flex items-center space-x-1.5"
+                :class="appsFilterTab === 'running' ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300' : 'bg-cyber-900 border-cyber-border text-gray-400 hover:text-gray-200'">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span>Running ({{ runningAppsCount }})</span>
+              </button>
+              <button
+                @click="appsFilterTab = 'all'"
+                class="px-2.5 py-1 rounded transition border text-[11px]"
+                :class="appsFilterTab === 'all' ? 'bg-purple-500/20 border-purple-500/50 text-purple-300' : 'bg-cyber-900 border-cyber-border text-gray-400 hover:text-gray-200'">
+                <span>All Processes ({{ totalProcessesCount }})</span>
+              </button>
+            </div>
+
+            <!-- Custom Target Input toggle -->
+            <button
+              @click="showCustomInput = !showCustomInput"
+              class="text-[11px] text-gray-400 hover:text-cyan-400 flex items-center space-x-1 transition">
+              <span>{{ showCustomInput ? 'Hide Custom' : '+ Custom Target' }}</span>
+            </button>
+          </div>
+
+          <!-- Custom Target Manual Form -->
+          <div v-if="showCustomInput" class="p-2.5 bg-cyber-900 border border-cyber-border rounded space-y-2 text-xs font-mono">
+            <div class="text-[10px] text-gray-400">Attach or spawn by specific PID, Process Name, or Bundle ID:</div>
+            <div class="flex items-center space-x-2">
+              <input
+                type="text"
+                v-model="customTargetInput"
+                placeholder="e.g. 13813 or com.apple.Preferences"
+                class="flex-1 bg-cyber-950 border border-cyber-border focus:border-cyan-500 px-2.5 py-1.5 rounded text-white font-mono text-xs outline-none"
+              />
+              <button
+                @click="switchTargetApp(customTargetInput, false)"
+                :disabled="!customTargetInput || switchingTarget"
+                class="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 font-bold rounded transition disabled:opacity-50">
+                Attach
+              </button>
+              <button
+                @click="switchTargetApp(customTargetInput, true)"
+                :disabled="!customTargetInput || switchingTarget"
+                class="px-3 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 font-bold rounded transition disabled:opacity-50">
+                Spawn
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Apps List Body -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-1.5 font-mono min-h-[320px]">
+          <!-- Loading State -->
+          <div v-if="appsLoading" class="py-12 flex flex-col items-center justify-center text-gray-500 space-y-2">
+            <span class="text-2xl animate-spin text-cyan-400">↻</span>
+            <p class="text-xs">Querying iOS device via Frida...</p>
+          </div>
+
+          <!-- Empty State -->
+          <div v-if="!appsLoading && filteredAppsList.length === 0" class="py-12 flex flex-col items-center justify-center text-gray-500 space-y-1">
+            <p class="text-xs">No applications match your filter.</p>
+            <button @click="appsSearchQuery = ''; appsFilterTab = 'apps'" class="text-xs text-cyan-400 hover:underline">Reset filter</button>
+          </div>
+
+          <!-- App Rows Container (Clean rendering with NO v-else) -->
+          <div v-if="!appsLoading && filteredAppsList.length > 0" class="space-y-1">
+            <div
+              v-for="app in filteredAppsList"
+              :key="(app.identifier || app.name) + '_' + (app.pid || '0')"
+              class="flex items-center justify-between p-2 rounded hover:bg-cyber-850 border border-cyber-border/30 hover:border-cyan-500/40 transition group cursor-pointer"
+              @click="switchTargetApp(app, !app.isRunning)">
+
+              <div class="flex items-center space-x-3 min-w-0 pr-3">
+                <!-- App Icon / Letter Avatar -->
+                <div
+                  class="w-7 h-7 rounded-md flex items-center justify-center font-bold text-xs shrink-0 border"
+                  :class="app.isRunning ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-cyber-800 border-cyber-border text-gray-400'">
+                  {{ (app.name || app.identifier || 'A').slice(0, 1).toUpperCase() }}
+                </div>
+
+                <!-- Name & Identifier -->
+                <div class="min-w-0">
+                  <div class="flex items-center space-x-2">
+                    <span class="text-xs font-bold text-white group-hover:text-cyan-300 truncate font-mono">
+                      {{ app.name }}
+                    </span>
+                    <!-- Active Target Badge -->
+                    <span v-if="session.target === app.name || session.target === app.identifier || (session.pid && session.pid === app.pid)" class="text-[9px] bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 px-1 rounded font-semibold">
+                      CURRENT
+                    </span>
+                    <span v-if="app.type === 'process'" class="text-[9px] bg-gray-800 text-gray-400 px-1 rounded border border-gray-700">
+                      daemon
+                    </span>
+                  </div>
+                  <div class="text-[11px] text-gray-400 truncate font-mono flex items-center space-x-2">
+                    <span>{{ app.identifier }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Action Buttons / PID -->
+              <div class="flex items-center space-x-2 shrink-0">
+                <span v-if="app.pid" class="text-[10px] bg-cyber-800 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded font-mono">
+                  PID: {{ app.pid }}
+                </span>
+
+                <button
+                  v-if="app.isRunning"
+                  @click.stop="switchTargetApp(app, false)"
+                  :disabled="switchingTarget"
+                  class="px-2.5 py-1 text-xs font-mono bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 rounded transition flex items-center space-x-1 font-bold">
+                  <span>Attach</span>
+                </button>
+
+                <button
+                  v-else
+                  @click.stop="switchTargetApp(app, true)"
+                  :disabled="switchingTarget"
+                  class="px-2.5 py-1 text-xs font-mono bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 rounded transition flex items-center space-x-1">
+                  <span>Spawn</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="px-5 py-2.5 bg-cyber-850 border-t border-cyber-border flex items-center justify-between text-[11px] font-mono text-gray-400 shrink-0">
+          <span>Target Device: <strong class="text-cyan-400">{{ session.device }}</strong></span>
+          <span v-if="switchingTarget" class="text-amber-400 animate-pulse font-bold">Attaching to target...</span>
+          <span v-else class="text-gray-500">Press Esc to cancel</span>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- QUICK-COPY DISASSEMBLER MODAL (Shortkey 'c') -->
+    <div v-if="showCopyModal" class="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-50 p-4" @click.self="showCopyModal = false">
+      <div class="bg-cyber-900 border border-cyber-border rounded-xl w-full max-w-lg overflow-hidden shadow-2xl glow-cyan">
+        <div class="px-4 py-3 bg-cyber-850 border-b border-cyber-border flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <span class="text-cyan-400 font-bold">⚡ Quick-Copy Disassembler Jump</span>
+            <span class="text-xs text-gray-500 font-mono">[ESC to close]</span>
+          </div>
+          <button @click="showCopyModal = false" class="text-gray-500 hover:text-white">✕</button>
+        </div>
+
+        <div class="p-4 space-y-2.5 font-mono text-xs" v-if="selectedEvent">
+          <button @click="copyJumpCommand('ida'); showCopyModal = false;" class="w-full p-2.5 bg-cyber-950 hover:bg-cyber-800 border border-cyber-border rounded flex items-center justify-between group">
+            <div>
+              <div class="text-cyan-400 font-bold">1 · IDA Pro Jump Command</div>
+              <div class="text-gray-400 text-[11px]">ida64 -a{{ selectedEvent.location.implementation }}</div>
+            </div>
+            <span class="text-xs text-gray-500 group-hover:text-cyan-400">Copy</span>
+          </button>
+
+          <button @click="copyJumpCommand('ghidra'); showCopyModal = false;" class="w-full p-2.5 bg-cyber-950 hover:bg-cyber-800 border border-cyber-border rounded flex items-center justify-between group">
+            <div>
+              <div class="text-purple-400 font-bold">2 · Ghidra toAddr() Script</div>
+              <div class="text-gray-400 text-[11px]">goTo(toAddr("{{ selectedEvent.location.implementation }}"))</div>
+            </div>
+            <span class="text-xs text-gray-500 group-hover:text-purple-400">Copy</span>
+          </button>
+
+          <button @click="copyJumpCommand('hopper'); showCopyModal = false;" class="w-full p-2.5 bg-cyber-950 hover:bg-cyber-800 border border-cyber-border rounded flex items-center justify-between group">
+            <div>
+              <div class="text-amber-400 font-bold">3 · Hopper Jump Offset</div>
+              <div class="text-gray-400 text-[11px]">{{ selectedEvent.location.offset }}</div>
+            </div>
+            <span class="text-xs text-gray-500 group-hover:text-amber-400">Copy</span>
+          </button>
+
+          <button @click="copyJumpCommand('lldb'); showCopyModal = false;" class="w-full p-2.5 bg-cyber-950 hover:bg-cyber-800 border border-cyber-border rounded flex items-center justify-between group">
+            <div>
+              <div class="text-emerald-400 font-bold">4 · LLDB Set Breakpoint</div>
+              <div class="text-gray-400 text-[11px]">breakpoint set --address {{ selectedEvent.location.implementation }}</div>
+            </div>
+            <span class="text-xs text-gray-500 group-hover:text-emerald-400">Copy</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SHORTCUTS HELP MODAL (Shortkey '?') -->
+    <div v-if="showHelpModal" class="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-50 p-4" @click.self="showHelpModal = false">
+      <div class="bg-cyber-900 border border-cyber-border rounded-xl w-full max-w-md overflow-hidden shadow-2xl">
+        <div class="px-4 py-3 bg-cyber-850 border-b border-cyber-border flex items-center justify-between">
+          <span class="text-white font-bold text-sm">Keyboard Shortcuts Cheat-Sheet</span>
+          <button @click="showHelpModal = false" class="text-gray-500 hover:text-white">✕</button>
+        </div>
+        <div class="p-4 space-y-2 font-mono text-xs">
+          <div class="flex justify-between py-1 border-b border-cyber-border/50">
+            <span class="text-gray-400">Next / Prev Event</span>
+            <span class="text-cyan-400 font-bold"><kbd>j</kbd> / <kbd>k</kbd> (Down/Up)</span>
+          </div>
+          <div class="flex justify-between py-1 border-b border-cyber-border/50">
+            <span class="text-gray-400">Switch Detail Tabs</span>
+            <span class="text-cyan-400 font-bold"><kbd>1</kbd> - <kbd>6</kbd></span>
+          </div>
+          <div class="flex justify-between py-1 border-b border-cyber-border/50">
+            <span class="text-gray-400">Focus Search Filter</span>
+            <span class="text-cyan-400 font-bold"><kbd>/</kbd></span>
+          </div>
+          <div class="flex justify-between py-1 border-b border-cyber-border/50">
+            <span class="text-gray-400">Clear Search / Close Modal</span>
+            <span class="text-cyan-400 font-bold"><kbd>Esc</kbd></span>
+          </div>
+          <div class="flex justify-between py-1 border-b border-cyber-border/50">
+            <span class="text-gray-400">Toggle Pin / Star</span>
+            <span class="text-cyan-400 font-bold"><kbd>p</kbd></span>
+          </div>
+          <div class="flex justify-between py-1 border-b border-cyber-border/50">
+            <span class="text-gray-400">Quick-Copy Disassembler Modal</span>
+            <span class="text-cyan-400 font-bold"><kbd>c</kbd></span>
+          </div>
+          <div class="flex justify-between py-1 border-b border-cyber-border/50">
+            <span class="text-gray-400">Replay Handler</span>
+            <span class="text-cyan-400 font-bold"><kbd>r</kbd></span>
+          </div>
+          <div class="flex justify-between py-1">
+            <span class="text-gray-400">Pause / Resume Stream</span>
+            <span class="text-cyan-400 font-bold"><kbd>F2</kbd></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CLASS & METHOD EXPLORER MODAL -->
+    <div v-if="showClassModal" class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center z-50 p-4" @click.self="showClassModal = false">
+      <div class="bg-cyber-900 border border-cyber-border rounded-xl w-full max-w-4xl h-[82vh] flex flex-col overflow-hidden shadow-2xl glow-cyan">
+        <!-- Modal Header -->
+        <div class="px-5 py-3.5 bg-cyber-850 border-b border-cyber-border flex items-center justify-between shrink-0">
+          <div class="flex items-center space-x-3">
+            <span class="text-sm font-bold text-white font-mono flex items-center space-x-2">
+              <span class="text-cyan-400">⚡</span>
+              <span>Objective-C & Swift Class Explorer</span>
+            </span>
+            <span class="text-xs text-gray-500 font-mono">({{ classTotal }} classes indexed via native ABI)</span>
+          </div>
+          <button @click="showClassModal = false" class="text-gray-400 hover:text-white transition">✕</button>
+        </div>
+
+        <!-- Search Bar -->
+        <div class="p-3 bg-cyber-900 border-b border-cyber-border flex items-center space-x-2 shrink-0">
+          <input
+            type="text"
+            v-model="classSearchQuery"
+            @keydown.enter="searchClasses()"
+            placeholder="Search classes (e.g. ViewController, Login, Session, LAContext, Payment)..."
+            class="flex-1 bg-cyber-950 border border-cyber-border focus:border-cyan-400 text-xs text-white rounded px-3 py-1.5 font-mono outline-none"
+          />
+          <button
+            @click="searchClasses()"
+            class="px-4 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 rounded text-xs font-mono font-bold flex items-center space-x-1.5">
+            <span v-if="classLoading" class="animate-spin inline-block">↻</span>
+            <span>Search</span>
+          </button>
+        </div>
+
+        <!-- Two-pane Class & Methods Body -->
+        <div class="flex-1 flex overflow-hidden font-mono text-xs">
+          <!-- Left: Class List -->
+          <div class="w-1/2 border-r border-cyber-border overflow-y-auto divide-y divide-cyber-border/40 bg-cyber-950 p-1">
+            <div v-if="classLoading" class="p-4 text-center text-gray-500">
+              <span class="animate-spin inline-block mr-2">↻</span> Scanning Objective-C runtime via objc_copyClassList...
+            </div>
+            <div v-else-if="!classList.length" class="p-4 text-center text-gray-500">
+              No classes matched search query.
+            </div>
+            <div
+              v-for="cls in classList"
+              :key="cls"
+              @click="selectClass(cls)"
+              class="px-3 py-2 cursor-pointer transition flex items-center justify-between rounded hover:bg-cyber-900"
+              :class="selectedClass === cls ? 'bg-cyber-850 text-cyan-300 font-bold border-l-2 border-cyan-400' : 'text-gray-300'">
+              <span class="truncate">{{ cls }}</span>
+              <span class="text-gray-600 text-[10px]">➔</span>
+            </div>
+          </div>
+
+          <!-- Right: Method List -->
+          <div class="w-1/2 overflow-y-auto bg-cyber-900 p-3 space-y-2">
+            <div v-if="!selectedClass" class="h-full flex items-center justify-center text-gray-500">
+              Select a class on the left to inspect methods and implementations
+            </div>
+            <div v-else-if="methodsLoading" class="h-full flex items-center justify-center text-gray-500">
+              <span class="animate-spin inline-block mr-2">↻</span> Loading method table for {{ selectedClass }}...
+            </div>
+            <div v-else class="space-y-2">
+              <div class="flex items-center justify-between pb-2 border-b border-cyber-border">
+                <span class="text-xs font-bold text-white truncate max-w-[280px]">{{ selectedClass }}</span>
+                <span class="text-[10px] text-gray-500">{{ methodsList.length }} methods</span>
+              </div>
+              <div v-if="!methodsList.length" class="text-gray-500 text-center py-4">
+                No methods found for this class.
+              </div>
+              <div v-for="(m, mi) in methodsList" :key="mi" class="p-2 bg-cyber-950 border border-cyber-border rounded space-y-1 hover:border-cyan-500/40 transition">
+                <div class="flex items-center justify-between">
+                  <span class="text-cyan-300 font-bold select-text break-all">{{ m.selector }}</span>
+                  <button
+                    @click="exportClassMethodHook(selectedClass, m)"
+                    class="px-2 py-0.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded border border-purple-500/40 text-[10px] font-bold shrink-0 ml-2"
+                    title="Export standalone Frida hook for this method">
+                    Export Hook
+                  </button>
+                </div>
+                <div class="text-[11px] text-gray-500 flex items-center space-x-2">
+                  <span>IMP:</span>
+                  <span class="text-emerald-400 font-mono">{{ m.implementation }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="px-5 py-2.5 bg-cyber-850 border-t border-cyber-border flex items-center justify-between text-[11px] font-mono text-gray-400 shrink-0">
+          <span>Objective-C Runtime ABI Direct Inspection</span>
+          <span class="text-gray-500">Press Esc to close</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROXY & BURP SUITE TRAFFIC MODAL -->
+    <div v-if="showProxyModal" class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center z-50 p-4" @click.self="showProxyModal = false">
+      <div class="bg-cyber-900 border border-cyber-border rounded-xl w-full max-w-lg flex flex-col overflow-hidden shadow-2xl glow-amber">
+        <!-- Modal Header -->
+        <div class="px-5 py-3.5 bg-cyber-850 border-b border-cyber-border flex items-center justify-between shrink-0">
+          <div class="flex items-center space-x-2.5">
+            <span class="text-amber-400">🌐</span>
+            <span class="text-sm font-bold text-white font-mono">In-App Socket Proxy & Traffic Routing</span>
+          </div>
+          <button @click="showProxyModal = false" class="text-gray-400 hover:text-white transition">✕</button>
+        </div>
+
+        <!-- Body -->
+        <div class="p-5 font-mono text-xs space-y-4 text-gray-300">
+          <p class="text-gray-400 leading-relaxed text-[11px]">
+            Redirect all outbound TCP socket connections on ports 80/443 directly to your inspection proxy (e.g. Burp Suite), even when the app uses HTTPDNS or raw BSD sockets that bypass system Wi-Fi proxy settings.
+          </p>
+
+          <div class="space-y-3 bg-cyber-950 p-3.5 rounded-lg border border-cyber-border">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-white">Transparent Redirection:</span>
+              <button
+                @click="proxy.enabled = !proxy.enabled"
+                class="px-2.5 py-1 rounded text-xs font-bold transition flex items-center space-x-1.5"
+                :class="proxy.enabled ? 'bg-amber-500 text-black' : 'bg-gray-800 text-gray-400 border border-gray-700'">
+                <span>{{ proxy.enabled ? 'ENABLED' : 'DISABLED' }}</span>
+              </button>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 pt-2">
+              <div class="col-span-2">
+                <label class="text-[10px] text-gray-500 uppercase">Proxy Host / IP</label>
+                <input
+                  type="text"
+                  v-model="proxy.host"
+                  placeholder="192.168.50.216"
+                  class="w-full mt-1 bg-cyber-900 border border-cyber-border focus:border-amber-400 text-white rounded px-2.5 py-1.5 outline-none font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label class="text-[10px] text-gray-500 uppercase">Port</label>
+                <input
+                  type="number"
+                  v-model="proxy.port"
+                  placeholder="1337"
+                  class="w-full mt-1 bg-cyber-900 border border-cyber-border focus:border-amber-400 text-white rounded px-2.5 py-1.5 outline-none font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            <!-- Quick Presets -->
+            <div class="pt-2 border-t border-cyber-border/40 flex items-center space-x-2 text-[10px]">
+              <span class="text-gray-500">Presets:</span>
+              <button
+                @click="proxy.host = '192.168.50.216'; proxy.port = 1337"
+                class="px-2 py-0.5 bg-cyber-900 hover:bg-cyber-800 border border-cyber-border rounded text-amber-300">
+                Burp (192.168.50.216:1337)
+              </button>
+              <button
+                @click="proxy.host = '127.0.0.1'; proxy.port = 8080"
+                class="px-2 py-0.5 bg-cyber-900 hover:bg-cyber-800 border border-cyber-border rounded text-gray-300">
+                Localhost (8080)
+              </button>
+            </div>
+          </div>
+
+          <!-- Feature status cards -->
+          <div class="space-y-2 text-[11px]">
+            <div class="p-2.5 bg-cyber-950/80 rounded border border-cyber-border flex items-start space-x-2.5">
+              <span class="text-emerald-400 text-sm">🛡️</span>
+              <div>
+                <span class="font-bold text-white">UDP 443 QUIC Disabler:</span>
+                <span class="text-emerald-400 ml-1 font-bold">AUTOMATIC</span>
+                <p class="text-gray-500 text-[10px] mt-0.5">
+                  Drops UDP port 443 packets so Chromium, Cronet, and TTNet network engines automatically fall back to standard TCP TLS HTTP/2 for Burp Suite decryption.
+                </p>
+              </div>
+            </div>
+
+            <div class="p-2.5 bg-cyber-950/80 rounded border border-cyber-border flex items-start space-x-2.5">
+              <span class="text-cyan-400 text-sm">⚡</span>
+              <div>
+                <span class="font-bold text-white">BoringSSL Verification Coercion:</span>
+                <span class="text-cyan-400 ml-1 font-bold">ACTIVE</span>
+                <p class="text-gray-500 text-[10px] mt-0.5">
+                  Direct callback return coercion (<span class="text-white">retval = 0</span>) ensures internal certificate verification structures update without triggering anti-tamper exit.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="px-5 py-3 bg-cyber-850 border-t border-cyber-border flex items-center justify-between">
+          <span class="text-gray-500 text-[10px]">Applies immediately to running app session</span>
+          <div class="flex items-center space-x-2">
+            <button
+              @click="showProxyModal = false"
+              class="px-3 py-1 bg-cyber-800 hover:bg-cyber-700 text-gray-300 rounded text-xs">
+              Cancel
+            </button>
+            <button
+              @click="saveProxyConfig()"
+              class="px-4 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded text-xs flex items-center space-x-1 shadow-md">
+              <span>Save & Apply</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div v-if="toastMessage" class="fixed bottom-4 right-4 bg-cyber-800 border border-cyan-400 text-white px-3.5 py-2 rounded-lg shadow-xl text-xs font-mono flex items-center space-x-2 z-50 glow-cyan animate-bounce">
+      <span class="text-cyan-400">✓</span>
+      <span>{{ toastMessage }}</span>
+    </div>
+
+  </div>
+
+  <script>
+    // Real-time dataset dynamically populated from live Frida session
+    const INITIAL_EVENTS = [];
+
+    function App() {
+      return {
+        _mounted: false,
+        session: {
+          target: "Connecting...",
+          pid: null,
+          device: "Detecting iOS device...",
+          status: "Connecting...",
+          connected: false,
+        },
+        bridgeOnline: true,
+        bridgePort: 1337,
+        isPaused: false,
+        events: INITIAL_EVENTS,
+        selectedEvent: null,
+        selectedIndex: -1,
+        activeTab: "overview",
+        searchQuery: "",
+        selectedCategory: "ALL",
+        filterPinnedOnly: false,
+        showCopyModal: false,
+        showHelpModal: false,
+        showAppModal: false,
+        appsLoading: false,
+        appsSearchQuery: "",
+        appsFilterTab: "apps",
+        showCustomInput: false,
+        customTargetInput: "",
+        switchingTarget: false,
+        availableApps: [],
+        toastMessage: "",
+        tamperValue: '{"action": "bypass", "status": true}',
+        hoveredByte: {
+          address: "0x0",
+          hex: "0x00",
+          u8: 0,
+          u32: "0x0",
+          ascii: "."
+        },
+        // Real-time logs fetched from /api/logs (Zero Mock Data)
+        logs: [],
+        // Live Hex Memory Reader
+        liveHexRows: [],
+        hexLoading: false,
+        hexAddressInput: "",
+        hexError: "",
+        // In-App Frida REPL Console
+        consoleHistory: [
+          { type: "system", text: "iOSuite Frida REPL Interactive Console. Type any JS or Frida API command." }
+        ],
+        consoleInput: "",
+        consoleLoading: false,
+        // Class Explorer Modal
+        showClassModal: false,
+        classSearchQuery: "",
+        classLoading: false,
+        classList: [],
+        classTotal: 0,
+        selectedClass: "",
+        methodsList: [],
+        methodsLoading: false,
+        // Security Assistant Bypasses
+        bypasses: {
+          sslPinning: false,
+          jailbreak: false
+        },
+        // Dropdown popover menus state
+        showBypassMenu: false,
+        showProxyMenu: false,
+        showActionsMenu: false,
+        showTabActionsMenu: false,
+        showViewsMenu: false,
+        showCategoryMenu: false,
+        currentNav: 'events',
+        // In-App Socket Proxy & Redirection
+        proxy: {
+          host: "192.168.50.216",
+          port: 1337,
+          enabled: false
+        },
+        showProxyModal: false,
+        categories: [
+          { id: "ALL", label: "ALL", activeClass: "bg-cyan-500/20 border-cyan-500/50 text-cyan-300" },
+          { id: "ui_action", label: "UI ACTION", activeClass: "bg-emerald-500/20 border-emerald-500/50 text-emerald-300" },
+          { id: "security", label: "SECURITY", activeClass: "bg-rose-500/20 border-rose-500/50 text-rose-300" },
+          { id: "navigation", label: "NAVIGATION", activeClass: "bg-purple-500/20 border-purple-500/50 text-purple-300" },
+          { id: "network_trigger", label: "NETWORK", activeClass: "bg-blue-500/20 border-blue-500/50 text-blue-300" },
+          { id: "gesture", label: "GESTURE", activeClass: "bg-sky-500/20 border-sky-500/50 text-sky-300" }
+        ],
+        mainEventTabs: [
+          { id: "overview", label: "Overview", shortcut: "1" },
+          { id: "backtrace", label: "Backtrace", shortcut: "2" },
+          { id: "arguments", label: "Arguments", shortcut: "3" },
+          { id: "disassembly", label: "Disasm", shortcut: "4" }
+        ],
+        tabs: [
+          { id: "overview", label: "Overview", shortcut: "1" },
+          { id: "backtrace", label: "Backtrace", shortcut: "2" },
+          { id: "arguments", label: "Arguments", shortcut: "3" },
+          { id: "disassembly", label: "Disasm", shortcut: "4" },
+          { id: "memory", label: "Hex", shortcut: "5" },
+          { id: "console", label: "REPL", shortcut: "6" },
+          { id: "logs", label: "Logs", shortcut: "7" }
+        ],
+
+        get appsCount() {
+          return this.availableApps.filter(a => a.type === "app").length;
+        },
+
+        get runningAppsCount() {
+          return this.availableApps.filter(a => a.isRunning).length;
+        },
+
+        get totalProcessesCount() {
+          return this.availableApps.length;
+        },
+
+        get filteredAppsList() {
+          let list = this.availableApps || [];
+          if (this.appsFilterTab === "apps") {
+            list = list.filter(a => a.type === "app");
+          } else if (this.appsFilterTab === "running") {
+            list = list.filter(a => a.isRunning);
+          }
+          if (!this.appsSearchQuery) return list;
+          const q = this.appsSearchQuery.toLowerCase().trim();
+          return list.filter(a =>
+            (a.name && a.name.toLowerCase().includes(q)) ||
+            (a.identifier && a.identifier.toLowerCase().includes(q)) ||
+            (a.pid && String(a.pid).includes(q))
+          );
+        },
+
+        get filteredEvents() {
+          return this.events.filter(e => {
+            if (this.filterPinnedOnly && !e.pinned) return false;
+            if (this.selectedCategory !== "ALL" && e.category !== this.selectedCategory) return false;
+            if (!this.searchQuery) return true;
+
+            // Regex search support (/pattern/)
+            if (this.searchQuery.startsWith('/') && this.searchQuery.length > 2) {
+              try {
+                const parts = this.searchQuery.slice(1).split('/');
+                const reg = new RegExp(parts[0], parts[1] || 'i');
+                return reg.test(e.selector) || reg.test(e.targetClass);
+              } catch (_) {}
+            }
+            const q = this.searchQuery.toLowerCase();
+            return e.selector.toLowerCase().includes(q) || e.targetClass.toLowerCase().includes(q);
+          });
+        },
+
+        get hexRows() {
+          return this.liveHexRows;
+        },
+
+        mounted() {
+          if (this._mounted) return;
+          this._mounted = true;
+          console.log("iOSuite Desktop Webview initialized.");
+          // Attempt connecting to local backend bridge if available
+          this.checkBackendBridge();
+          this.startPolling();
+        },
+
+        startPolling() {
+          const poll = async () => {
+            try {
+              // 1. Fetch Session Info
+              const sessRes = await fetch("/api/session");
+              if (sessRes.ok) {
+                const sessData = await sessRes.json();
+                if (sessData.target) this.session.target = sessData.target;
+                this.session.pid = sessData.pid;
+                if (sessData.device) this.session.device = sessData.device;
+                if (sessData.status) this.session.status = sessData.status;
+                this.session.connected = !!sessData.connected || !!sessData.pid;
+                if (sessData.bridgePort) this.bridgePort = sessData.bridgePort;
+              }
+
+              // 2. Fetch Events
+              if (!this.isPaused) {
+                const evtRes = await fetch("/api/events");
+                if (evtRes.ok) {
+                  const evts = await evtRes.json();
+                  if (Array.isArray(evts)) {
+                    this.events = evts;
+                    if (!this.selectedEvent && this.events.length > 0) {
+                      this.selectedEvent = this.events[0];
+                      this.selectedIndex = 0;
+                    }
+                  }
+                }
+              }
+
+              // 3. Fetch Logs
+              const logsRes = await fetch("/api/logs");
+              if (logsRes.ok) {
+                const logsData = await logsRes.json();
+                if (Array.isArray(logsData) && logsData.length > 0) {
+                  this.logs = logsData;
+                }
+              }
+
+              // 4. Fetch Security Assistant Bypasses Status
+              await this.fetchBypasses();
+              await this.fetchProxyConfig();
+            } catch (_) {}
+          };
+
+          poll();
+          setInterval(poll, 600);
+        },
+
+        checkBackendBridge() {
+          // Poll local Python HTTP bridge or pywebview API
+          if (window.pywebview && window.pywebview.api) {
+            console.log("pywebview native bridge detected.");
+          } else {
+            fetch("http://127.0.0.1:1337/status")
+              .then(r => r.json())
+              .then(d => { this.bridgeOnline = true; })
+              .catch(() => { this.bridgeOnline = false; });
+          }
+        },
+
+        selectEvent(evt, idx) {
+          this.selectedEvent = evt;
+          this.selectedIndex = idx;
+          if (evt && evt.location && evt.location.implementation) {
+            this.hexAddressInput = evt.location.implementation;
+            if (this.activeTab === 'memory') {
+              this.fetchLiveHex(evt.location.implementation);
+            }
+          }
+        },
+
+        togglePin(evt) {
+          evt.pinned = !evt.pinned;
+          this.showToast(evt.pinned ? "Event pinned to favorites" : "Event unpinned");
+        },
+
+        toggleCategory(catId) {
+          this.selectedCategory = catId;
+        },
+
+        getCategoryCount(catId) {
+          if (catId === "ALL") return this.events.length;
+          return this.events.filter(e => e.category === catId).length;
+        },
+
+        getCategoryBadgeClass(cat) {
+          switch(cat) {
+            case "ui_action": return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+            case "security": return "bg-rose-500/15 text-rose-400 border-rose-500/40";
+            case "navigation": return "bg-purple-500/15 text-purple-400 border-purple-500/40";
+            case "network_trigger": return "bg-blue-500/15 text-blue-400 border-blue-500/40";
+            case "gesture": return "bg-sky-500/15 text-sky-400 border-sky-500/40";
+            default: return "bg-gray-500/15 text-gray-300 border-gray-500/40";
+          }
+        },
+
+        getLogLevelClass(lvl) {
+          switch(lvl) {
+            case "INFO": return "bg-cyan-500/20 text-cyan-400";
+            case "WARN": return "bg-amber-500/20 text-amber-400";
+            case "ERROR": return "bg-rose-500/20 text-rose-400";
+            default: return "bg-gray-700 text-gray-300";
+          }
+        },
+
+        escapeHtml(str) {
+          if (!str) return "";
+          return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+        },
+
+        highlightSearch(text) {
+          if (!text) return "";
+          const safeText = this.escapeHtml(text);
+          if (!this.searchQuery) return safeText;
+          try {
+            const q = this.escapeHtml(this.searchQuery.replace(/[\/\\]/g, ''));
+            if (!q) return safeText;
+            const regex = new RegExp(`(${q})`, 'gi');
+            return safeText.replace(regex, '<span class="highlight-match">$1</span>');
+          } catch (_) {
+            return safeText;
+          }
+        },
+
+        formatAsmOperands(opStr) {
+          if (!opStr) return "";
+          const safeOp = this.escapeHtml(opStr);
+          return safeOp
+            .replace(/(x[0-9]{1,2}|w[0-9]{1,2}|sp|fp|lr|xzr|wzr)/gi, '<span class="asm-reg">$1</span>')
+            .replace(/(#[0-9a-fx-]+|0x[0-9a-f]+)/gi, '<span class="asm-imm">$1</span>')
+            .replace(/(\[[^\]]+\])/gi, '<span class="asm-mem">$1</span>')
+            .replace(/(;.*$)/gi, '<span class="asm-comment">$1</span>');
+        },
+
+        inspectByte(offsetStr, byteIndex, hexVal) {
+          const u8 = parseInt(hexVal, 16);
+          const asciiChar = (u8 >= 32 && u8 <= 126) ? String.fromCharCode(u8) : '.';
+          this.hoveredByte = {
+            address: "0x" + (parseInt(offsetStr, 16) + byteIndex).toString(16).toUpperCase(),
+            hex: "0x" + hexVal,
+            u8: u8,
+            u32: "0x" + (u8 * 0x01010101).toString(16).toUpperCase(),
+            ascii: asciiChar
+          };
+        },
+
+        copyJumpCommand(tool) {
+          if (!this.selectedEvent) return;
+          const pc = this.selectedEvent.location.implementation;
+          const offset = this.selectedEvent.location.offset;
+          let cmd = "";
+
+          switch(tool) {
+            case 'ida':
+              cmd = `ida64 -a${pc}`;
+              // Dispatch to sync bridge
+              fetch(`http://127.0.0.1:1337/jump?offset=${offset}&pc=${pc}`).catch(() => {});
+              break;
+            case 'ghidra':
+              cmd = `goTo(toAddr("${pc}"))`;
+              break;
+            case 'hopper':
+              cmd = `hopper --jump ${offset}`;
+              break;
+            case 'lldb':
+              cmd = `breakpoint set --address ${pc}`;
+              break;
+          }
+
+          this.copyText(cmd);
+          this.showToast(`Copied ${tool.toUpperCase()} command: ${cmd}`);
+        },
+
+        copyText(text) {
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(text);
+          }
+        },
+
+        showToast(msg) {
+          this.toastMessage = msg;
+          setTimeout(() => { this.toastMessage = ""; }, 2500);
+        },
+
+        async triggerReplay() {
+          if (!this.selectedEvent) return;
+          try {
+            const resp = await fetch("/api/replay", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                targetPointer: this.selectedEvent.targetPointer,
+                selector: this.selectedEvent.selector,
+                senderPointer: "0x0"
+              })
+            });
+            const data = await resp.json();
+            this.showToast(data.message || `Replayed: -[${this.selectedEvent.targetClass} ${this.selectedEvent.selector}]`);
+          } catch (e) {
+            this.showToast(`Replay error: ${e.message}`);
+          }
+        },
+
+        async triggerTamperReplay() {
+          if (!this.selectedEvent) return;
+          try {
+            const resp = await fetch("/api/replay", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                targetPointer: this.selectedEvent.targetPointer,
+                selector: this.selectedEvent.selector,
+                senderPointer: this.tamperValue
+              })
+            });
+            const data = await resp.json();
+            this.showToast(data.message || "Mutated arguments sent to Frida RPC");
+          } catch (e) {
+            this.showToast(`Tamper replay error: ${e.message}`);
+          }
+        },
+
+        async togglePause() {
+          try {
+            await fetch("/api/pause", { method: "POST" });
+          } catch (_) {}
+          this.isPaused = !this.isPaused;
+          this.showToast(this.isPaused ? "Interception Paused" : "Interception Resumed");
+        },
+
+        async clearEvents() {
+          try {
+            await fetch("/api/clear", { method: "POST" });
+          } catch (_) {}
+          this.events = [];
+          this.selectedEvent = null;
+          this.selectedIndex = -1;
+          this.showToast("Cleared event buffer");
+        },
+
+        exportData(format) {
+          this.showToast(`Exported ${this.events.length} events to ${format.toUpperCase()}`);
+        },
+
+        openQuickCopyModal() {
+          this.showCopyModal = true;
+        },
+
+        openAppSelector() {
+          this.showAppModal = true;
+          this.fetchAvailableApps();
+        },
+
+        async fetchAvailableApps(force = false) {
+          // If we already have loaded apps and not forcing refresh, don't show full-screen spinner
+          if (this.availableApps.length === 0 || force) {
+            this.appsLoading = true;
+          }
+          try {
+            const url = force ? "/api/applications?refresh=true" : "/api/applications";
+            const res = await fetch(url);
+            if (res.ok) {
+              const data = await res.json();
+              if (Array.isArray(data)) {
+                this.availableApps = data;
+              }
+            }
+          } catch (e) {
+            console.error("Failed to fetch applications:", e);
+          } finally {
+            this.appsLoading = false;
+          }
+        },
+
+        async switchTargetApp(appOrTarget, shouldSpawn = false) {
+          if (!appOrTarget) return;
+
+          let targetIdentifier = "";
+          let displayName = "";
+
+          if (typeof appOrTarget === "object") {
+            // For apps, prioritize bundle identifier so suspended apps cleanly auto-spawn
+            if (appOrTarget.type === "app") {
+              targetIdentifier = appOrTarget.identifier || appOrTarget.name;
+            } else {
+              targetIdentifier = appOrTarget.name || String(appOrTarget.pid || appOrTarget.identifier);
+            }
+            displayName = appOrTarget.name || targetIdentifier;
+          } else {
+            targetIdentifier = String(appOrTarget).trim();
+            displayName = targetIdentifier;
+          }
+
+          if (!targetIdentifier) return;
+
+          this.switchingTarget = true;
+          // Optimistically show the target name and transition to attaching state
+          this.session.target = displayName;
+          this.session.pid = null;
+          this.session.connected = false;
+          this.session.status = `Attaching to ${displayName}...`;
+
+          // Clear events buffer immediately on switch so previous app events don't linger
+          this.events = [];
+          this.selectedEvent = null;
+          this.selectedIndex = -1;
+
+          try {
+            const res = await fetch("/api/switch_target", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ target: targetIdentifier, spawn: shouldSpawn })
+            });
+            const data = await res.json();
+            this.showToast(`Switching target to ${displayName}...`);
+            this.showAppModal = false;
+
+            // Immediate session re-fetch
+            const sessRes = await fetch("/api/session");
+            if (sessRes.ok) {
+              const sessData = await sessRes.json();
+              if (sessData.target) this.session.target = sessData.target;
+              this.session.pid = sessData.pid;
+              if (sessData.device) this.session.device = sessData.device;
+              if (sessData.status) this.session.status = sessData.status;
+              this.session.connected = !!sessData.connected || !!sessData.pid;
+            }
+          } catch (e) {
+            this.showToast(`Failed to switch target: ${e.message}`);
+          } finally {
+            this.switchingTarget = false;
+          }
+        },
+
+        manualAttachFirstMatch() {
+          if (this.filteredAppsList.length > 0) {
+            const first = this.filteredAppsList[0];
+            this.switchTargetApp(first, !first.isRunning);
+          } else if (this.appsSearchQuery) {
+            this.switchTargetApp(this.appsSearchQuery.trim(), false);
+          }
+        },
+
+        async fetchLiveHex(addr, size = 64) {
+          const targetAddr = addr || this.hexAddressInput || (this.selectedEvent && this.selectedEvent.location && this.selectedEvent.location.implementation) || "0x0";
+          if (!targetAddr || targetAddr === "0x0") return;
+          this.hexLoading = true;
+          this.hexError = "";
+          this.hexAddressInput = targetAddr;
+          try {
+            const res = await fetch(`/api/memory_hex?address=${encodeURIComponent(targetAddr)}&size=${size}`);
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success && data.rows) {
+                this.liveHexRows = data.rows;
+              } else {
+                this.hexError = data.error || "Failed reading device memory";
+              }
+            } else {
+              this.hexError = "HTTP error " + res.status;
+            }
+          } catch (e) {
+            this.hexError = String(e);
+          } finally {
+            this.hexLoading = false;
+          }
+        },
+
+        async fetchBypasses() {
+          try {
+            const res = await fetch("/api/bypasses");
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success && data.bypasses) {
+                this.bypasses = data.bypasses;
+              }
+            }
+          } catch (_) {}
+        },
+
+        async toggleBypass(feature) {
+          const next = !this.bypasses[feature];
+          try {
+            const res = await fetch("/api/bypasses", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ feature: feature, enabled: next })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success) {
+                this.bypasses[feature] = next;
+                this.showToast(`${feature === 'sslPinning' ? 'SSL Pinning Bypass' : 'Jailbreak Bypass'}: ${next ? 'ENABLED' : 'DISABLED'}`);
+              }
+            }
+          } catch (e) {
+            this.showToast("Bypass failed: " + e.message);
+          }
+        },
+
+        async fetchProxyConfig() {
+          try {
+            const res = await fetch("/api/proxy");
+            if (res.ok) {
+              const data = await res.json();
+              if (data) {
+                if (data.host) this.proxy.host = data.host;
+                if (data.port) this.proxy.port = data.port;
+                if (typeof data.enabled === "boolean") this.proxy.enabled = data.enabled;
+              }
+            }
+          } catch (_) {}
+        },
+
+        openProxyModal() {
+          this.fetchProxyConfig();
+          this.showProxyModal = true;
+        },
+
+        async saveProxyConfig() {
+          try {
+            const res = await fetch("/api/proxy", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                host: this.proxy.host,
+                port: parseInt(this.proxy.port, 10),
+                enabled: this.proxy.enabled
+              })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              this.showToast(`Proxy set to ${this.proxy.host}:${this.proxy.port} [${this.proxy.enabled ? 'ACTIVE' : 'DISABLED'}]`);
+              this.showProxyModal = false;
+            } else {
+              this.showToast("Failed to save proxy config");
+            }
+          } catch (e) {
+            this.showToast("Proxy error: " + e.message);
+          }
+        },
+
+        async relaunchTargetApp() {
+          this.showToast(`Relaunching ${this.session.target} with early bypass hooks...`);
+          try {
+            const res = await fetch("/api/relaunch", { method: "POST" });
+            const data = await res.json();
+            if (data.status === "ok" || data.success) {
+              this.showToast(`Successfully spawned ${this.session.target} with SSL pinning bypass active!`);
+            } else {
+              this.showToast(`Relaunch error: ${data.message || data.error}`);
+            }
+          } catch (e) {
+            this.showToast("Failed to relaunch: " + e.message);
+          }
+        },
+
+        async exportHookScript(evt) {
+          const target = evt || this.selectedEvent;
+          if (!target) {
+            this.showToast("Select an event or class method first");
+            return;
+          }
+          try {
+            const res = await fetch("/api/export_hook", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                targetClass: target.targetClass || "Target",
+                selector: target.selector || "init",
+                implementation: target.location ? target.location.implementation : "0x0"
+              })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success && data.script) {
+                const blob = new Blob([data.script], { type: "application/javascript" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = data.filename || "iosuite_hook.js";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                this.showToast(`Exported ${data.filename}`);
+              } else {
+                this.showToast("Export failed: " + (data.error || "Unknown"));
+              }
+            }
+          } catch (e) {
+            this.showToast("Export failed: " + e.message);
+          }
+        },
+
+        async openClassExplorer() {
+          this.showClassModal = true;
+          if (!this.classList.length) {
+            await this.searchClasses();
+          }
+        },
+
+        async searchClasses() {
+          this.classLoading = true;
+          try {
+            const q = encodeURIComponent(this.classSearchQuery || "");
+            const res = await fetch(`/api/classes?q=${q}`);
+            if (res.ok) {
+              const data = await res.json();
+              this.classList = data.classes || [];
+              this.classTotal = data.total || this.classList.length;
+            }
+          } catch (e) {
+            console.error(e);
+          } finally {
+            this.classLoading = false;
+          }
+        },
+
+        async selectClass(className) {
+          this.selectedClass = className;
+          this.methodsLoading = true;
+          this.methodsList = [];
+          try {
+            const c = encodeURIComponent(className);
+            const res = await fetch(`/api/methods?class=${c}`);
+            if (res.ok) {
+              const data = await res.json();
+              this.methodsList = data.methods || [];
+            }
+          } catch (e) {
+            console.error(e);
+          } finally {
+            this.methodsLoading = false;
+          }
+        },
+
+        exportClassMethodHook(className, method) {
+          this.exportHookScript({
+            targetClass: className,
+            selector: method.selector,
+            location: { implementation: method.implementation }
+          });
+        },
+
+        async evalConsoleCommand() {
+          const code = this.consoleInput.trim();
+          if (!code) return;
+          this.consoleHistory.push({ type: "input", text: code });
+          this.consoleInput = "";
+          this.consoleLoading = true;
+          try {
+            const res = await fetch("/api/eval", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ code: code })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success) {
+                this.consoleHistory.push({ type: "output", text: data.result });
+              } else {
+                this.consoleHistory.push({ type: "error", text: data.error || "Evaluation failed" });
+              }
+            } else {
+              this.consoleHistory.push({ type: "error", text: "HTTP error: " + res.status });
+            }
+          } catch (e) {
+            this.consoleHistory.push({ type: "error", text: String(e.message || e) });
+          } finally {
+            this.consoleLoading = false;
+            setTimeout(() => {
+              const el = document.getElementById("console-output-box");
+              if (el) el.scrollTop = el.scrollHeight;
+            }, 50);
+          }
+        },
+
+        resetFilters() {
+          this.searchQuery = "";
+          this.selectedCategory = "ALL";
+          this.filterPinnedOnly = false;
+        },
+
+        toggleDropdown(menu) {
+          const wasOpen = (
+            (menu === 'bypass' && this.showBypassMenu) ||
+            (menu === 'proxy' && this.showProxyMenu) ||
+            (menu === 'actions' && this.showActionsMenu) ||
+            (menu === 'tabActions' && this.showTabActionsMenu) ||
+            (menu === 'viewsMenu' && this.showViewsMenu) ||
+            (menu === 'categoryMenu' && this.showCategoryMenu)
+          );
+          this.closeAllDropdowns();
+          if (!wasOpen) {
+            if (menu === 'bypass') this.showBypassMenu = true;
+            else if (menu === 'proxy') {
+              this.showProxyMenu = true;
+              this.fetchProxyConfig();
+            }
+            else if (menu === 'actions') this.showActionsMenu = true;
+            else if (menu === 'tabActions') this.showTabActionsMenu = true;
+            else if (menu === 'viewsMenu') this.showViewsMenu = true;
+            else if (menu === 'categoryMenu') this.showCategoryMenu = true;
+          }
+        },
+
+        closeAllDropdowns() {
+          this.showBypassMenu = false;
+          this.showProxyMenu = false;
+          this.showActionsMenu = false;
+          this.showTabActionsMenu = false;
+          this.showViewsMenu = false;
+          this.showCategoryMenu = false;
+        },
+
+        navToView(view) {
+          this.currentNav = view;
+          if (view === 'events' && (this.activeTab === 'memory' || this.activeTab === 'console' || this.activeTab === 'logs')) {
+            this.activeTab = 'overview';
+          }
+        },
+
+        navToTab(tabId) {
+          this.currentNav = 'events';
+          this.activeTab = tabId;
+          if (tabId === 'memory') {
+            this.fetchLiveHex();
+          }
+        },
+
+        handleGlobalKey(e) {
+          // If typing in input, only handle Escape
+          if (e.target.tagName === 'INPUT') {
+            if (e.key === 'Escape') {
+              e.target.blur();
+              this.searchQuery = "";
+              this.showAppModal = false;
+              this.showClassModal = false;
+              this.showProxyModal = false;
+              this.closeAllDropdowns();
+            }
+            return;
+          }
+
+          if (this.showBypassMenu || this.showProxyMenu || this.showActionsMenu || this.showTabActionsMenu || this.showViewsMenu || this.showCategoryMenu) {
+            if (e.key === 'Escape') {
+              this.closeAllDropdowns();
+              return;
+            }
+          }
+
+          if (this.showCopyModal || this.showHelpModal || this.showAppModal || this.showClassModal || this.showProxyModal) {
+            if (e.key === 'Escape') {
+              this.showCopyModal = false;
+              this.showHelpModal = false;
+              this.showAppModal = false;
+              this.showClassModal = false;
+              this.showProxyModal = false;
+            }
+            return;
+          }
+
+          // Shortcuts
+          switch(e.key) {
+            case 't':
+              this.openAppSelector();
+              break;
+            case 'j':
+            case 'ArrowDown':
+              e.preventDefault();
+              if (this.selectedIndex < this.filteredEvents.length - 1) {
+                this.selectedIndex++;
+                this.selectedEvent = this.filteredEvents[this.selectedIndex];
+              }
+              break;
+            case 'k':
+            case 'ArrowUp':
+              e.preventDefault();
+              if (this.selectedIndex > 0) {
+                this.selectedIndex--;
+                this.selectedEvent = this.filteredEvents[this.selectedIndex];
+              }
+              break;
+            case '1': this.activeTab = 'overview'; break;
+            case '2': this.activeTab = 'backtrace'; break;
+            case '3': this.activeTab = 'arguments'; break;
+            case '4': this.activeTab = 'disassembly'; break;
+            case '5':
+              this.activeTab = 'memory';
+              this.fetchLiveHex();
+              break;
+            case '6': this.activeTab = 'console'; break;
+            case '7': this.activeTab = 'logs'; break;
+            case '/':
+              e.preventDefault();
+              document.getElementById('search-input')?.focus();
+              break;
+            case 'Escape':
+              this.resetFilters();
+              this.closeAllDropdowns();
+              break;
+            case 'p':
+              if (this.selectedEvent) this.togglePin(this.selectedEvent);
+              break;
+            case 'c':
+              this.showCopyModal = true;
+              break;
+            case 'r':
+              this.triggerReplay();
+              break;
+            case 'R':
+              this.activeTab = 'arguments';
+              break;
+            case '?':
+            case 'F1':
+              this.showHelpModal = true;
+              break;
+            case 'F2':
+              this.togglePause();
+              break;
+            case 'F3':
+              this.clearEvents();
+              break;
+          }
+        }
+      };
+    }
+
+    const app = App();
+    PetiteVue.createApp(app).mount('#app');
+    if (typeof app.mounted === 'function') {
+      app.mounted();
+    }
+  </script>
+</body>
+</html>
