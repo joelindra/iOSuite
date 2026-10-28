@@ -279,6 +279,10 @@
                 <span>BoringSSL Coercion:</span>
                 <span class="text-cyan-400 font-bold">READY</span>
               </div>
+              <div v-if="bypasses.sslPinning" class="flex items-center justify-between">
+                <span>To capture HTTPS in Burp:</span>
+                <span class="text-amber-400 font-bold">Enable Transparent Redirection</span>
+              </div>
             </div>
           </div>
         </div>
@@ -337,9 +341,10 @@
                   Burp (192.168.50.216:1337)
                 </button>
                 <button
-                  @click="proxy.host = '127.0.0.1'; proxy.port = 8080; saveProxyConfig();"
-                  class="px-2 py-1 bg-cyber-950 hover:bg-cyber-800 border border-cyber-border rounded text-[10px] text-gray-300 text-left transition">
-                  Localhost (127.0.0.1:8080)
+                  @click="proxy.host = '192.168.50.216'; proxy.port = 8080; saveProxyConfig();"
+                  class="px-2 py-1 bg-cyber-950 hover:bg-cyber-800 border border-cyber-border rounded text-[10px] text-cyan-300 text-left transition"
+                  title="Burp's second listener on the laptop's LAN IP. Use the LAN IP — 127.0.0.1 on the iPhone means the iPhone itself.">
+                  Burp (192.168.50.216:8080)
                 </button>
               </div>
             </div>
@@ -898,13 +903,20 @@
               <!-- Method Card -->
               <div class="bg-cyber-900 border border-cyber-border rounded-lg p-3.5 space-y-2.5">
                 <div class="flex items-center justify-between">
-                  <span class="text-xs uppercase font-bold text-gray-400 tracking-wider">Method Signature</span>
-                  <span class="text-[10px] px-2 py-0.5 rounded font-bold" :class="selectedEvent.location.isApp ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-gray-700/30 text-gray-400 border border-gray-700'">
-                    {{ selectedEvent.location.isApp ? 'APP TARGET' : 'SYSTEM FRAMEWORK' }}
+                  <span class="text-xs uppercase font-bold text-gray-400 tracking-wider">
+                    {{ selectedEvent.category === 'network_trigger' ? 'Network Target / Endpoint' : 'Method Signature' }}
+                  </span>
+                  <span class="text-[10px] px-2 py-0.5 rounded font-bold" :class="selectedEvent.location && selectedEvent.location.isApp ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-gray-700/30 text-gray-400 border border-gray-700'">
+                    {{ selectedEvent.location && selectedEvent.location.isApp ? 'APP TARGET' : 'SYSTEM FRAMEWORK' }}
                   </span>
                 </div>
                 <div class="text-sm font-bold text-cyan-300 select-text break-all">
-                  -[{{ selectedEvent.targetClass }} {{ selectedEvent.selector }}]
+                  <template v-if="selectedEvent.category === 'network_trigger'">
+                    {{ selectedEvent.summary || (selectedEvent.targetClass + ': ' + selectedEvent.selector) }}
+                  </template>
+                  <template v-else>
+                    -[{{ selectedEvent.targetClass }} {{ selectedEvent.selector }}]
+                  </template>
                 </div>
                 <div v-if="selectedEvent.swiftDemangled" class="text-xs text-purple-300 bg-cyber-950 p-2 rounded border border-cyber-border select-text">
                   <div class="text-[10px] text-gray-500 mb-0.5">Demangled Swift Symbol:</div>
@@ -1731,7 +1743,11 @@
         <!-- Body -->
         <div class="p-5 font-mono text-xs space-y-4 text-gray-300">
           <p class="text-gray-400 leading-relaxed text-[11px]">
-            Redirect all outbound TCP socket connections on ports 80/443 directly to your inspection proxy (e.g. Burp Suite), even when the app uses HTTPDNS or raw BSD sockets that bypass system Wi-Fi proxy settings.
+            Redirects the target app's own <b>outbound TCP socket connections on ports 80/443</b> (raw BSD sockets / NSURLSession that bypass the system Wi-Fi proxy) into Burp.<br>
+            The redirect is protocol-blind, so iOSuite interposes a <b>transparent relay</b>: the device talks plain TCP to the relay, and the relay re-frames HTTPS as <code>CONNECT host:443</code> and HTTP as an absolute-form request before handing it to Burp. The <b>Burp listener</b> fields below are what sits <i>behind</i> the relay — the device is never pointed at Burp directly.
+          </p>
+          <p class="text-gray-400 leading-relaxed text-[11px]">
+            <span class="text-yellow-400">⚠ Does not cover WKWebView / miniprogram traffic</span> — that runs in a separate system process using the iPhone's system Wi-Fi HTTP proxy + iOS system trust store; point the Wi-Fi proxy at the relay's address below and install the Burp CA to capture it.
           </p>
 
           <div class="space-y-3 bg-cyber-950 p-3.5 rounded-lg border border-cyber-border">
@@ -1747,7 +1763,7 @@
 
             <div class="grid grid-cols-3 gap-2 pt-2">
               <div class="col-span-2">
-                <label class="text-[10px] text-gray-500 uppercase">Proxy Host / IP</label>
+                <label class="text-[10px] text-gray-500 uppercase">Burp Listener Host / IP</label>
                 <input
                   type="text"
                   v-model="proxy.host"
@@ -1766,6 +1782,22 @@
               </div>
             </div>
 
+            <!-- Relay status -->
+            <div class="pt-2 border-t border-cyber-border/40 flex items-center justify-between text-[10px]">
+              <span class="text-gray-500">Relay:</span>
+              <span v-if="proxy.relay && proxy.relay.running" class="text-emerald-400">
+                ● LISTENING {{ proxy.relay.listenHostAdvertised || proxy.relay.listenHost }}:{{ proxy.relay.listenPort }}
+                → {{ proxy.relay.upstream }} · {{ proxy.relay.connections }} conn
+              </span>
+              <span v-else-if="proxy.relay && proxy.relay.lastError" class="text-rose-400">
+                ● ERROR {{ proxy.relay.lastError }}
+              </span>
+              <span v-else class="text-gray-500">○ stopped (enable redirection to start)</span>
+            </div>
+            <div v-if="proxy.redirect" class="text-[10px] text-cyan-300">
+              Device redirect target: <code>{{ proxy.redirect.host }}:{{ proxy.redirect.port }}</code>
+            </div>
+
             <!-- Quick Presets -->
             <div class="pt-2 border-t border-cyber-border/40 flex items-center space-x-2 text-[10px]">
               <span class="text-gray-500">Presets:</span>
@@ -1775,10 +1807,26 @@
                 Burp (192.168.50.216:1337)
               </button>
               <button
-                @click="proxy.host = '127.0.0.1'; proxy.port = 8080"
-                class="px-2 py-0.5 bg-cyber-900 hover:bg-cyber-800 border border-cyber-border rounded text-gray-300">
-                Localhost (8080)
+                @click="proxy.host = '192.168.50.216'; proxy.port = 8080"
+                class="px-2 py-0.5 bg-cyber-900 hover:bg-cyber-800 border border-cyber-border rounded text-cyan-300"
+                title="Burp's second listener on the laptop's LAN IP. Use the LAN IP — 127.0.0.1 on the iPhone means the iPhone itself.">
+                Burp (192.168.50.216:8080)
               </button>
+            </div>
+
+            <!-- WKWebView / miniprogram capture hint -->
+            <div class="pt-2 border-t border-cyber-border/40 bg-cyber-900/60 p-2 rounded border">
+              <div class="text-[10px] text-gray-400 mb-1">💡 Capture WKWebView / miniprogram (Buy Package, coverage):</div>
+              <div class="text-[10px] text-gray-300 leading-relaxed">
+                Two separate paths reach Burp, so set up both:<br>
+                <b class="text-amber-300">1. Target app's own sockets</b> — the in-app redirect above sends them to the <b>relay</b>. Nothing else to do.<br>
+                <b class="text-cyan-300">2. WKWebView / miniprogram</b> — runs in a separate system process using the iPhone's <b>system Wi-Fi HTTP proxy</b>. Set <b>Settings → Wi-Fi → (i) → Configure Proxy → Manual</b> to the Burp listener ({{ proxy.host }}:{{ proxy.port }}), <u>not</u> the relay.<br>
+                <b class="text-rose-300">Required for both:</b> install the Burp CA in Safari at
+                <code class="text-white">http://{{ proxy.host }}:{{ proxy.port }}/cert</code>
+                (<code class="text-white">http://burp/cert</code> also works once the proxy is set), then enable it in
+                <b>Settings → General → About → Certificate Trust Settings</b>.<br>
+                <span class="text-gray-500">Symptom if you skip the CA: HTTP shows up in Burp, HTTPS fails with <code>-1202</code> "certificate for this server is invalid" — the traffic already reached Burp, it just isn't trusted yet.</span>
+              </div>
             </div>
           </div>
 
@@ -1917,7 +1965,9 @@
         proxy: {
           host: "192.168.50.216",
           port: 1337,
-          enabled: false
+          enabled: false,
+          relay: null,
+          redirect: null
         },
         showProxyModal: false,
         categories: [
@@ -1983,11 +2033,11 @@
               try {
                 const parts = this.searchQuery.slice(1).split('/');
                 const reg = new RegExp(parts[0], parts[1] || 'i');
-                return reg.test(e.selector) || reg.test(e.targetClass);
+                return reg.test(e.selector) || reg.test(e.targetClass) || reg.test(e.summary || '');
               } catch (_) {}
             }
             const q = this.searchQuery.toLowerCase();
-            return e.selector.toLowerCase().includes(q) || e.targetClass.toLowerCase().includes(q);
+            return e.selector.toLowerCase().includes(q) || e.targetClass.toLowerCase().includes(q) || (e.summary && e.summary.toLowerCase().includes(q));
           });
         },
 
@@ -2419,6 +2469,8 @@
                 if (data.host) this.proxy.host = data.host;
                 if (data.port) this.proxy.port = data.port;
                 if (typeof data.enabled === "boolean") this.proxy.enabled = data.enabled;
+                this.proxy.relay = data.relay || null;
+                this.proxy.redirect = data.redirect || null;
               }
             }
           } catch (_) {}
@@ -2442,8 +2494,20 @@
             });
             if (res.ok) {
               const data = await res.json();
-              this.showToast(`Proxy set to ${this.proxy.host}:${this.proxy.port} [${this.proxy.enabled ? 'ACTIVE' : 'DISABLED'}]`);
+              if (!data.success) {
+                this.showToast(`Proxy error: ${data.error || 'unknown'}`);
+                return;
+              }
+              this.proxy.relay = data.relay || null;
+              this.proxy.redirect = data.redirect || null;
+              if (this.proxy.enabled && data.redirect) {
+                this.showToast(`Redirect → relay ${data.redirect.host}:${data.redirect.port} → Burp ${data.host}:${data.port}`);
+              } else {
+                this.showToast(`Proxy set to ${data.host}:${data.port} [${this.proxy.enabled ? 'ACTIVE' : 'DISABLED'}]`);
+              }
               this.showProxyModal = false;
+              // Relay counters move as traffic flows; keep the modal view fresh.
+              setTimeout(() => this.fetchProxyConfig(), 1500);
             } else {
               this.showToast("Failed to save proxy config");
             }

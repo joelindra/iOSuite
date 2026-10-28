@@ -57,6 +57,8 @@
     var ptr_class_copyMethodList = findExport('class_copyMethodList');
     var ptr_method_getName = findExport('method_getName');
     var ptr_method_getImplementation = findExport('method_getImplementation');
+    var ptr_class_getInstanceMethod = findExport('class_getInstanceMethod');
+    var ptr_objc_msgForward = findExport('_objc_msgForward');
     var ptr_free = findExport('free');
 
     var fn_sel_getName = ptr_sel_getName ? new NativeFunction(ptr_sel_getName, 'pointer', ['pointer']) : null;
@@ -65,6 +67,7 @@
     var fn_sel_registerName = ptr_sel_registerName ? new NativeFunction(ptr_sel_registerName, 'pointer', ['pointer']) : null;
     var fn_objc_msgSend = ptr_objc_msgSend ? new NativeFunction(ptr_objc_msgSend, 'pointer', ['pointer', 'pointer', 'pointer']) : null;
     var fn_class_getMethodImplementation = ptr_class_getMethodImplementation ? new NativeFunction(ptr_class_getMethodImplementation, 'pointer', ['pointer', 'pointer']) : null;
+    var fn_class_getInstanceMethod = ptr_class_getInstanceMethod ? new NativeFunction(ptr_class_getInstanceMethod, 'pointer', ['pointer', 'pointer']) : null;
     var fn_objc_copyClassList = ptr_objc_copyClassList ? new NativeFunction(ptr_objc_copyClassList, 'pointer', ['pointer']) : null;
     var fn_objc_getClass = ptr_objc_getClass ? new NativeFunction(ptr_objc_getClass, 'pointer', ['pointer']) : null;
     var fn_class_copyMethodList = ptr_class_copyMethodList ? new NativeFunction(ptr_class_copyMethodList, 'pointer', ['pointer', 'pointer']) : null;
@@ -72,8 +75,18 @@
     var fn_method_getImplementation = ptr_method_getImplementation ? new NativeFunction(ptr_method_getImplementation, 'pointer', ['pointer']) : null;
     var fn_free = ptr_free ? new NativeFunction(ptr_free, 'void', ['pointer']) : null;
 
+    function isValidPointer(p) {
+        if (!p || p.isNull()) return false;
+        try {
+            if (p.compare(ptr('0x100000')) < 0) return false;
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
     function safeReadString(ptrVal) {
-        if (!ptrVal || ptrVal.isNull()) return '';
+        if (!isValidPointer(ptrVal)) return '';
         try {
             return ptrVal.readUtf8String() || '';
         } catch (e) {
@@ -83,6 +96,16 @@
                 return '';
             }
         }
+    }
+
+    function readNsStr(p) {
+        if (!isValidPointer(p) || !fn_objc_msgSend || !fn_sel_registerName) return '';
+        try {
+            var selUtf8 = fn_sel_registerName(Memory.allocUtf8String('UTF8String'));
+            var c = fn_objc_msgSend(p, selUtf8);
+            if (isValidPointer(c)) return safeReadString(c);
+        } catch (e) {}
+        return '';
     }
 
     function getClassName(objPtr) {
@@ -246,6 +269,9 @@
     }
 
     function emitEvent(event) {
+        if (appOnlyFilter && event && event.location && event.location.isApp === false) {
+            return;
+        }
         send({
             type: 'event',
             payload: event
@@ -253,16 +279,33 @@
     }
 
     // Lightweight Direct-Method Objective-C Instrumentation
+    // Supports both Frida ObjC bridge and native libobjc fallback for Frida 17+
     // Avoids ApiResolver('objc') mass-scan which triggers memory integrity watchdogs in TikTok / anti-cheat apps.
-    // Attaches directly to specific class method implementations via ObjC.classes dictionary.
     function hookClassMethod(className, selName, category, actionType, onEnterCallback) {
-        if (typeof ObjC === 'undefined' || !ObjC.available) return false;
+        var cleanSel = selName.replace(/^[-+]\s*/, '').trim();
+        var impl = null;
+        if (hasObjCBridge) {
+            try {
+                var cls = ObjC.classes[className];
+                if (cls && cls[selName] && cls[selName].implementation) {
+                    impl = cls[selName].implementation;
+                }
+            } catch (e) {}
+        }
+        if (!impl && fn_objc_getClass && fn_sel_registerName && fn_class_getMethodImplementation) {
+            try {
+                var c = fn_objc_getClass(Memory.allocUtf8String(className));
+                if (c && !c.isNull()) {
+                    var s = fn_sel_registerName(Memory.allocUtf8String(cleanSel));
+                    var mImpl = fn_class_getMethodImplementation(c, s);
+                    if (mImpl && !mImpl.isNull()) {
+                        impl = mImpl;
+                    }
+                }
+            } catch (e2) {}
+        }
+        if (!impl || impl.isNull()) return false;
         try {
-            var cls = ObjC.classes[className];
-            if (!cls) return false;
-            var m = cls[selName];
-            if (!m || !m.implementation) return false;
-            var impl = m.implementation;
             Interceptor.attach(impl, {
                 onEnter: function (args) {
                     try {
@@ -271,17 +314,13 @@
                 }
             });
             return true;
-        } catch (e) {
+        } catch (e3) {
             return false;
         }
     }
 
     function installLightweightObjCHooks() {
-        if (typeof ObjC === 'undefined' || !ObjC.available) {
-            setTimeout(installLightweightObjCHooks, 1000);
-            return;
-        }
-        hasObjCBridge = true;
+        hasObjCBridge = (typeof ObjC !== 'undefined' && ObjC.available);
 
         // 1. UI Action: UIApplication sendAction:to:from:forEvent:
         hookClassMethod('UIApplication', '- sendAction:to:from:forEvent:', 'ui_action', 'sendAction', function (args, impl) {
@@ -406,6 +445,14 @@
                 try {
                     if (hasObjCBridge) {
                         urlStr = new ObjC.Object(nsUrl).absoluteString().toString();
+                    } else if (fn_objc_msgSend && fn_sel_registerName) {
+                        var selAbs = fn_sel_registerName(Memory.allocUtf8String('absoluteString'));
+                        var selUtf8 = fn_sel_registerName(Memory.allocUtf8String('UTF8String'));
+                        var absObj = fn_objc_msgSend(nsUrl, selAbs);
+                        if (absObj && !absObj.isNull()) {
+                            var cstr = fn_objc_msgSend(absObj, selUtf8);
+                            if (cstr && !cstr.isNull()) urlStr = safeReadString(cstr);
+                        }
                     }
                 } catch (e) {}
             }
@@ -431,8 +478,213 @@
                 summary: 'Open URL: ' + urlStr
             });
         });
+
+        // 7. WebKit Script Message Handlers (WKScriptMessageHandler interception)
+        installWebKitHooks();
+
+        // 8. Network Requests (NSURLSessionTask resume interception)
+        installNetworkHooks();
     }
-    setTimeout(installLightweightObjCHooks, 1500);
+
+    function installNetworkHooks() {
+        if (!fn_objc_getClass || !fn_sel_registerName || !fn_class_getMethodImplementation) return;
+        try {
+            var cTask = fn_objc_getClass(Memory.allocUtf8String('NSURLSessionTask'));
+            if (!cTask || cTask.isNull()) return;
+            var sResume = fn_sel_registerName(Memory.allocUtf8String('resume'));
+            var impResume = fn_class_getMethodImplementation(cTask, sResume);
+            if (!impResume || impResume.isNull()) return;
+
+            var selCurrentReq = fn_sel_registerName(Memory.allocUtf8String('currentRequest'));
+            var selOrigReq = fn_sel_registerName(Memory.allocUtf8String('originalRequest'));
+            var selURL = fn_sel_registerName(Memory.allocUtf8String('URL'));
+            var selAbsStr = fn_sel_registerName(Memory.allocUtf8String('absoluteString'));
+            var selMethod = fn_sel_registerName(Memory.allocUtf8String('HTTPMethod'));
+
+            Interceptor.attach(impResume, {
+                onEnter: function (args) {
+                    try {
+                        var task = args[0];
+                        if (!isValidPointer(task)) return;
+                        var req = fn_objc_msgSend(task, selCurrentReq);
+                        if (!isValidPointer(req)) req = fn_objc_msgSend(task, selOrigReq);
+                        if (!isValidPointer(req)) return;
+
+                        var urlObj = fn_objc_msgSend(req, selURL);
+                        var urlStr = '';
+                        if (isValidPointer(urlObj)) {
+                            var absObj = fn_objc_msgSend(urlObj, selAbsStr);
+                            urlStr = readNsStr(absObj);
+                        }
+                        var mObj = fn_objc_msgSend(req, selMethod);
+                        var method = readNsStr(mObj) || 'GET';
+
+                        if (urlStr) {
+                            var host = '';
+                            var path = '';
+                            var uMatch = urlStr.match(/^https?:\/\/([^\/\?#]+)(.*)$/i);
+                            if (uMatch) {
+                                host = uMatch[1];
+                                path = uMatch[2] || '/';
+                            } else {
+                                host = urlStr;
+                                path = '/';
+                            }
+
+                            var shortPath = path.length > 60 ? path.substring(0, 57) + '...' : path;
+                            var summaryStr = 'HTTP ' + method + ': ' + urlStr;
+
+                            var mod = null;
+                            try { mod = Process.findModuleByAddress(impResume); } catch (e) {}
+
+                            emitEvent({
+                                id: 'http_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+                                timestamp: new Date().toISOString(),
+                                category: 'network_trigger',
+                                actionType: 'httpRequest',
+                                selector: method + ' ' + shortPath,
+                                targetClass: host,
+                                targetPointer: task.toString(),
+                                location: {
+                                    implementation: impResume.toString(),
+                                    moduleName: mod ? mod.name : 'CFNetwork',
+                                    moduleBase: mod ? mod.base.toString() : '0x0',
+                                    offset: mod ? impResume.sub(mod.base).toString() : '0x0',
+                                    isApp: false,
+                                    disassembly: []
+                                },
+                                backtrace: [],
+                                summary: summaryStr
+                            });
+                        }
+                    } catch (e) {}
+                }
+            });
+        } catch (e) {}
+    }
+
+    function installWebKitHooks() {
+        if (!fn_objc_getClass || !fn_sel_registerName || !fn_class_getMethodImplementation) return;
+        try {
+            var cUCC = fn_objc_getClass(Memory.allocUtf8String('WKUserContentController'));
+            if (!cUCC || cUCC.isNull()) return;
+
+            var regSels = [
+                'addScriptMessageHandler:name:',
+                'addScriptMessageHandler:contentWorld:name:',
+                'addScriptMessageHandlerWithReply:name:',
+                'addScriptMessageHandlerWithReply:contentWorld:name:'
+            ];
+
+            var hookedHandlers = {};
+            var selRecv = fn_sel_registerName(Memory.allocUtf8String('userContentController:didReceiveScriptMessage:'));
+            var selName = fn_sel_registerName(Memory.allocUtf8String('name'));
+            var selBody = fn_sel_registerName(Memory.allocUtf8String('body'));
+            var selWv = fn_sel_registerName(Memory.allocUtf8String('webView'));
+            var selUrl = fn_sel_registerName(Memory.allocUtf8String('URL'));
+            var selAbs = fn_sel_registerName(Memory.allocUtf8String('absoluteString'));
+            var selUtf8 = fn_sel_registerName(Memory.allocUtf8String('UTF8String'));
+            var selDesc = fn_sel_registerName(Memory.allocUtf8String('description'));
+
+            function readNsStr(p) {
+                if (!p || p.isNull() || !fn_objc_msgSend) return '';
+                try {
+                    var c = fn_objc_msgSend(p, selUtf8);
+                    if (c && !c.isNull()) return safeReadString(c);
+                } catch (e) {}
+                return '';
+            }
+
+            function readNsDesc(p) {
+                if (!p || p.isNull() || !fn_objc_msgSend) return 'nil';
+                try {
+                    var d = fn_objc_msgSend(p, selDesc);
+                    var s = readNsStr(d);
+                    if (s) return s;
+                } catch (e) {}
+                return '0x' + p.toString(16);
+            }
+
+            function hookHandlerClass(hCls) {
+                if (!isValidPointer(hCls)) return;
+                var cname = getClassName(hCls);
+                if (hookedHandlers[cname]) return;
+                hookedHandlers[cname] = true;
+
+                if (fn_class_getInstanceMethod) {
+                    var m = fn_class_getInstanceMethod(hCls, selRecv);
+                    if (!isValidPointer(m)) return;
+                }
+
+                var mImpl = null;
+                try {
+                    mImpl = fn_class_getMethodImplementation(hCls, selRecv);
+                } catch (e) {}
+                if (!isValidPointer(mImpl)) return;
+                if (ptr_objc_msgForward && mImpl.equals(ptr_objc_msgForward)) return;
+
+                Interceptor.attach(mImpl, {
+                    onEnter: function (args) {
+                        var msg = args[3];
+                        var hName = '';
+                        var body = '';
+                        var url = '';
+                        if (isValidPointer(msg)) {
+                            try { hName = readNsStr(fn_objc_msgSend(msg, selName)); } catch (e) {}
+                            try { body = readNsDesc(fn_objc_msgSend(msg, selBody)); } catch (e) {}
+                            try {
+                                var wv = fn_objc_msgSend(msg, selWv);
+                                if (isValidPointer(wv)) {
+                                    var u = fn_objc_msgSend(wv, selUrl);
+                                    if (isValidPointer(u)) url = readNsStr(fn_objc_msgSend(u, selAbs));
+                                }
+                            } catch (e) {}
+                        }
+                        var summaryStr = 'WKMessage: ' + (hName || cname) + ' (' + (body.length > 80 ? body.substring(0, 77) + '...' : body) + ')';
+                        emitEvent({
+                            id: 'wmsg_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+                            timestamp: new Date().toISOString(),
+                            category: 'network_trigger',
+                            actionType: 'scriptMessage',
+                            selector: hName || 'WKScriptMessage',
+                            targetClass: cname + (url ? ' • ' + url : ''),
+                            targetPointer: args[0].toString(),
+                            location: {
+                                implementation: mImpl.toString(),
+                                moduleName: 'WebKit',
+                                moduleBase: '0x0',
+                                offset: '0x0',
+                                isApp: false,
+                                disassembly: []
+                            },
+                            backtrace: [],
+                            summary: summaryStr
+                        });
+                    }
+                });
+            }
+
+            regSels.forEach(function (sName) {
+                var s = fn_sel_registerName(Memory.allocUtf8String(sName));
+                var imp = fn_class_getMethodImplementation(cUCC, s);
+                if (imp && !imp.isNull()) {
+                    Interceptor.attach(imp, {
+                        onEnter: function (args) {
+                            var handlerObj = args[2];
+                            if (isValidPointer(handlerObj) && fn_object_getClass) {
+                                try {
+                                    var hCls = fn_object_getClass(handlerObj);
+                                    if (isValidPointer(hCls)) hookHandlerClass(hCls);
+                                } catch (e) {}
+                            }
+                        }
+                    });
+                }
+            });
+        } catch (e) {}
+    }
+
+    setTimeout(installLightweightObjCHooks, 500);
 
     // Dynamic Bypass Assistant States & Hooks (Integrated from iosf-ng universal bypass)
     var activeBypasses = {
@@ -539,7 +791,14 @@
                 onLeave: function (retval) {
                     if (activeBypasses.sslPinning) {
                         var orig = retval.toInt32();
-                        if (orig !== 0) {
+                        // BoringSSL enum ssl_verify_result_t:
+                        // 0 = ssl_verify_ok
+                        // 1 = ssl_verify_invalid
+                        // 2 = ssl_verify_retry
+                        // Only coerce ssl_verify_invalid (1) to ssl_verify_ok (0).
+                        // Leaving ssl_verify_retry (2) intact is critical to avoid
+                        // corrupting asynchronous TLS 1.3 handshakes.
+                        if (orig === 1) {
                             retval.replace(ptr(0)); // 0 = ssl_verify_ok in BoringSSL
                         }
                     }
@@ -585,8 +844,8 @@
                                         timestamp: new Date().toISOString(),
                                         category: 'network_trigger',
                                         actionType: 'tlsHandshake',
-                                        selector: 'SSL_set_tlsext_host_name',
-                                        targetClass: 'BoringSSL',
+                                        selector: host,
+                                        targetClass: 'BoringSSL (TLS SNI)',
                                         targetPointer: args[0].toString(),
                                         location: {
                                             implementation: ptr(pSni).toString(),
@@ -597,7 +856,7 @@
                                             disassembly: []
                                         },
                                         backtrace: [],
-                                        summary: 'TLS SNI (' + modName + '): ' + host
+                                        summary: 'TLS SNI: ' + host + ' (' + modName + ')'
                                     });
                                 }
                             } catch (e) {}
@@ -671,18 +930,19 @@
         } catch (e) {}
     }
 
-    ['libboringssl.dylib', 'boringssl'].forEach(function (m) {
-        hookBoringModule(m);
-    });
+    function scanAndHookBoringModules() {
+        hookBoringModule('libboringssl.dylib');
+        try {
+            Process.enumerateModules().forEach(function (m) {
+                var n = (m.name || '').toLowerCase();
+                if (n.indexOf('boring') !== -1 || n.indexOf('cronet') !== -1 || n.indexOf('ttnet') !== -1 || n.indexOf('quic') !== -1) {
+                    hookBoringModule(m.name);
+                }
+            });
+        } catch (e) {}
+    }
 
-    var boringCheckCount = 0;
-    var boringCheckTimer = setInterval(function () {
-        boringCheckCount++;
-        hookBoringModule('boringssl');
-        if (hookedBoringModules['boringssl'] || boringCheckCount > 30) {
-            clearInterval(boringCheckTimer);
-        }
-    }, 200);
+    scanAndHookBoringModules();
 
     try {
         var pDlopen = findExport('dlopen');
@@ -690,7 +950,7 @@
             Interceptor.attach(pDlopen, {
                 onLeave: function (retval) {
                     if (!retval.isNull()) {
-                        hookBoringModule('boringssl');
+                        scanAndHookBoringModules();
                     }
                 }
             });
@@ -701,13 +961,13 @@
     var proxyConfig = {
         enabled: false,
         host: '192.168.50.216',
-        port: 1337
+        port: 1338
     };
     var proxyIpParts = [192, 168, 50, 216];
 
     function updateProxyConfig(host, port, enabled) {
         if (host) proxyConfig.host = String(host).trim();
-        if (port) proxyConfig.port = parseInt(port, 10) || 1337;
+        if (port) proxyConfig.port = parseInt(port, 10) || 1338;
         proxyConfig.enabled = !!enabled;
         try {
             proxyIpParts = proxyConfig.host.split('.').map(function (x) { return parseInt(x, 10); });
@@ -730,6 +990,12 @@
                             var port = (sa.add(2).readU8() << 8) | sa.add(3).readU8();
                             var ip = sa.add(4).readU8() + '.' + sa.add(5).readU8() + '.' + sa.add(6).readU8() + '.' + sa.add(7).readU8();
                             if ((port === 443 || port === 80) && ip !== proxyConfig.host && ip !== '127.0.0.1' && ip !== '0.0.0.0') {
+                                // NOTE: this redirect is protocol-blind -- it moves the
+                                // destination only, so a :443 socket still emits a raw TLS
+                                // ClientHello with no CONNECT preposition. Burp cannot parse
+                                // that. proxyConfig must therefore point at iOSuite's
+                                // transparent relay (default :1338), which re-frames the
+                                // stream as CONNECT / absolute-form before Burp sees it.
                                 sa.add(2).writeU8((proxyConfig.port >> 8) & 0xff);
                                 sa.add(3).writeU8(proxyConfig.port & 0xff);
                                 sa.add(4).writeU8(proxyIpParts[0]);
@@ -975,6 +1241,20 @@
         set_bypass: setBypass,
         getBypasses: getBypasses,
         get_bypasses: getBypasses,
+        setAppOnlyFilter: function (enabled) {
+            appOnlyFilter = !!enabled;
+            return { success: true, appOnlyFilter: appOnlyFilter };
+        },
+        set_app_only_filter: function (enabled) {
+            appOnlyFilter = !!enabled;
+            return { success: true, appOnlyFilter: appOnlyFilter };
+        },
+        getAppOnlyFilter: function () {
+            return { success: true, appOnlyFilter: appOnlyFilter };
+        },
+        get_app_only_filter: function () {
+            return { success: true, appOnlyFilter: appOnlyFilter };
+        },
         setProxy: function (host, port, enabled) {
             updateProxyConfig(host, port, enabled);
             return { success: true, host: proxyConfig.host, port: proxyConfig.port, enabled: proxyConfig.enabled };

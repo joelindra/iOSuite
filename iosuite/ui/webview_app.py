@@ -21,6 +21,7 @@ from typing import Optional, Dict, Any, List
 from iosuite.core.mock import MockSessionGenerator
 from iosuite.core.dispatcher import EventDispatcher, InterceptedEvent
 from iosuite.core.bridge import DisassemblerBridge
+from iosuite.core.relay import TransparentProxyRelay
 
 
 ASSETS_DIR = Path(__file__).parent / "assets"
@@ -413,6 +414,14 @@ class DesktopWebviewOrchestrator:
         self._running = False
         self._paused = False
 
+        # Transparent proxy relay that sits between the protocol-blind socket
+        # redirect (agent.js) and Burp. HTTPS/raw TLS from the device is framed
+        # as CONNECT → Burp; plain HTTP is rewritten to absolute form.
+        # Burp's own proxy listener is the upstream target (1337 by default);
+        # the relay listens on the next port (1338 by default).
+        self.relay: Optional[TransparentProxyRelay] = None
+        self._proxy_upstream: Dict[str, Any] = {"host": "192.168.50.216", "port": 1337, "enabled": False}
+
         # Target switching generation counter to prevent race conditions on fast app switching
         self._switch_generation = 0
         self._connection_lock = threading.Lock()
@@ -550,6 +559,20 @@ class DesktopWebviewOrchestrator:
                 self.target = target_name
                 self.status = f"Attached to PID {self.pid}"
                 self.add_log("INFO", f"Attached to {target_name} (PID: {self.pid}) on {self.device_name}")
+
+                # Re-apply an already-enabled socket redirect to the fresh process:
+                # agent.js keeps its proxyConfig per-injected-process, so a new
+                # attach starts from the default (off).
+                if self._proxy_upstream.get("enabled") and self.relay and self.relay.running:
+                    rh = self.relay.listen_host_advertised or self.relay.listen_host
+                    rp = self.relay.listen_port
+                    try:
+                        new_session.set_proxy(rh, rp, True)
+                        self.add_log("INFO", f"Re-applied socket redirect to PID {self.pid}: "
+                                             f"device -> {rh}:{rp} (relay) -> "
+                                             f"{self.relay.upstream_host}:{self.relay.upstream_port}")
+                    except Exception as e:
+                        self.add_log("WARN", f"Could not re-apply socket redirect: {e}")
 
             except Exception as e:
                 if expected_generation is None or expected_generation == self._switch_generation:
@@ -782,23 +805,184 @@ class DesktopWebviewOrchestrator:
         return {"success": False, "bypasses": {"sslPinning": False, "jailbreak": False}}
 
     def set_proxy(self, host: str, port: int, enabled: bool) -> Dict[str, Any]:
-        """Configure in-app socket redirection to proxy."""
+        """Configure socket redirection to Burp *through* the transparent relay.
+
+        The injected redirect is protocol-blind: it rewrites a :443 socket's
+        destination with no CONNECT preposition, which Burp's listener cannot
+        parse (proven: raw TLS to a Burp proxy port times out). So the device is
+        pointed at a local relay instead, and the relay re-frames the stream as
+        `CONNECT host:443` / absolute-form HTTP toward Burp.
+
+        `host:port` below is the **Burp listener**. The device redirect target is
+        the returned `redirect.host:redirect.port`.
+        """
+        port = int(port or 1337)
+        self._proxy_upstream = {"host": host, "port": port, "enabled": bool(enabled)}
+
+        if not enabled:
+            self._stop_relay()
+            if self.session:
+                res = self.session.set_proxy(host, port, False)
+            elif self.mock_mode:
+                res = {"success": True}
+            else:
+                res = {"success": False, "error": "No active device session"}
+            self.add_log("INFO", f"Socket redirect disabled (Burp upstream {host}:{port})")
+            return {
+                "success": bool(res.get("success")),
+                "host": host,
+                "port": port,
+                "enabled": False,
+                "relay": None,
+                "redirect": None,
+                "error": res.get("error"),
+            }
+
+        relay_res = self._ensure_relay(host, port)
+        if not relay_res.get("success"):
+            self.add_log("ERROR", f"Relay could not start: {relay_res.get('error')}")
+            return {"success": False, "host": host, "port": port, "enabled": False,
+                    "error": relay_res.get("error"), "relay": None, "redirect": None}
+
+        redirect_host = relay_res["advertisedHost"]
+        redirect_port = relay_res["port"]
+
         if self.session:
-            res = self.session.set_proxy(host, port, enabled)
-            self.add_log("INFO", f"Socket Proxy Redirection set to {host}:{port} (enabled: {enabled})")
-            return res
+            res = self.session.set_proxy(redirect_host, redirect_port, True)
         elif self.mock_mode:
-            self.add_log("INFO", f"[Mock] Socket Proxy Redirection set to {host}:{port} (enabled: {enabled})")
-            return {"success": True, "host": host, "port": port, "enabled": enabled}
-        return {"success": False, "error": "No active device session"}
+            res = {"success": True}
+        else:
+            # Relay is live; the redirect is applied automatically once a
+            # session attaches (see _connect_real_session).
+            res = {"success": True, "pending": True,
+                   "message": "Relay started; redirect will apply when a session attaches"}
+        applied = bool(res.get("success"))
+
+        self.add_log(
+            "INFO" if applied else "WARN",
+            f"Socket redirect {'enabled' if applied else 'pending'}: "
+            f"device -> {redirect_host}:{redirect_port} (relay) -> Burp {host}:{port}"
+        )
+        return {
+            "success": applied,
+            "host": host,
+            "port": port,
+            "enabled": applied,
+            "pending": bool(res.get("pending", False)),
+            "error": res.get("error"),
+            "redirect": {"host": redirect_host, "port": redirect_port},
+            "relay": self.relay.status() if self.relay else None,
+        }
 
     def get_proxy(self) -> Dict[str, Any]:
-        """Get in-app socket proxy configuration."""
+        """Get socket proxy configuration plus live relay status."""
+        relay_status = self.relay.status() if self.relay else None
+        upstream = dict(self._proxy_upstream)
+        base = {
+            "success": True,
+            "host": upstream.get("host", "192.168.50.216"),
+            "port": int(upstream.get("port", 1337)),
+            "enabled": bool(upstream.get("enabled", False)),
+            "relay": relay_status,
+            "redirect": (
+                {
+                    "host": relay_status.get("listenHostAdvertised") or relay_status["listenHost"],
+                    "port": relay_status["listenPort"],
+                }
+                if relay_status and relay_status.get("running") else None
+            ),
+        }
         if self.session:
-            return self.session.get_proxy()
-        elif self.mock_mode:
-            return {"success": True, "host": "192.168.50.216", "port": 1337, "enabled": False}
-        return {"success": False, "host": "192.168.50.216", "port": 1337, "enabled": False}
+            try:
+                dev = self.session.get_proxy() or {}
+                base["device"] = dev
+                # If the orchestrator never configured a proxy, surface whatever
+                # the injected agent currently has so the UI reflects reality.
+                if not upstream.get("enabled") and dev.get("host") and dev.get("port"):
+                    base["deviceHost"] = dev["host"]
+                    base["devicePort"] = int(dev["port"])
+                    base["deviceEnabled"] = bool(dev.get("enabled", False))
+            except Exception as e:
+                base["error"] = str(e)
+        return base
+
+    # ---- transparent relay helpers -------------------------------------
+    @staticmethod
+    def _is_local_address(addr: str) -> bool:
+        """True when `addr` is bound to one of this machine's interfaces."""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.bind((addr, 0))
+                return True
+            finally:
+                s.close()
+        except OSError:
+            return False
+
+    def _detect_lan_ip(self, preferred: Optional[str] = None) -> str:
+        """Pick the address the iPhone should use to reach this machine.
+
+        If the Burp host is one of our own interfaces (the common single-machine
+        setup) it is already device-reachable. Otherwise ask the routing table
+        which local address reaches that host.
+        """
+        if preferred and self._is_local_address(preferred):
+            return preferred
+        probe = preferred or "8.8.8.8"
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect((probe, 9))  # no packets are sent for UDP connect
+                addr = s.getsockname()[0]
+                if addr and not addr.startswith("127."):
+                    return addr
+            finally:
+                s.close()
+        except OSError:
+            pass
+        return preferred or "127.0.0.1"
+
+    def _ensure_relay(self, burp_host: str, burp_port: int) -> Dict[str, Any]:
+        """Start (or reuse) the relay in front of the configured Burp listener."""
+        advertised = self._detect_lan_ip(burp_host)
+        if self.relay and self.relay.running:
+            if (self.relay.upstream_host, self.relay.upstream_port) == (burp_host, burp_port):
+                return {"success": True, "port": self.relay.listen_port,
+                        "advertisedHost": advertised}
+            self._stop_relay()
+
+        # Prefer a port adjacent to Burp's so the UI stays predictable.
+        candidates = [burp_port + 1, burp_port + 2, 0]
+        last_err = None
+        for cand in candidates:
+            relay = TransparentProxyRelay(
+                upstream_host=burp_host,
+                upstream_port=burp_port,
+                listen_host="0.0.0.0",
+                listen_port=cand,
+                log=self.add_log,
+            )
+            res = relay.start()
+            if res.get("success"):
+                relay.listen_host_advertised = advertised
+                self.relay = relay
+                return {"success": True, "port": relay.listen_port,
+                        "advertisedHost": advertised}
+            last_err = res.get("error")
+            # Try every candidate regardless of wording: the bind-error message
+            # varies by OS ("address already in use" vs "Only one usage ..."),
+            # so don't gate retries on a substring match. A distinct free port
+            # may be the next candidate, and 0 always resolves to ephemeral.
+        return {"success": False, "error": last_err or "relay failed to start"}
+
+    def _stop_relay(self) -> None:
+        if self.relay:
+            try:
+                self.relay.stop()
+            except Exception:
+                pass
+            self.relay = None
 
     def relaunch_target(self) -> Dict[str, Any]:
         """Cleanly re-spawns current target application so early BoringSSL and TLS hooks attach before main()."""
@@ -996,6 +1180,7 @@ class DesktopWebviewOrchestrator:
     def stop(self):
         """Clean shutdown."""
         self._running = False
+        self._stop_relay()
         if self.bridge:
             self.bridge.stop()
         if self.server:
