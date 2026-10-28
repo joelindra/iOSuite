@@ -40,7 +40,7 @@ class InterceptedEvent:
     @property
     def key(self) -> str:
         """Key used for deduplicating consecutive identical actions."""
-        return f"{self.category}:{self.target_class}:{self.selector}:{self.action_type}"
+        return f"{self.category}:{self.target_class}:{self.selector}:{self.action_type}:{self.summary}"
 
 
 class EventDispatcher:
