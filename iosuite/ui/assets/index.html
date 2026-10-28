@@ -215,8 +215,14 @@
             class="px-2 sm:px-2.5 py-1 text-xs font-mono rounded transition flex items-center space-x-1.5 border cursor-pointer"
             :class="(bypasses.sslPinning || bypasses.jailbreak) ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-sm shadow-emerald-500/10' : 'bg-cyber-850 hover:bg-cyber-800 border-cyber-border text-gray-300'"
             title="SSL Pinning & Jailbreak Detection Bypasses">
-            <span class="w-2 h-2 rounded-full" :class="(bypasses.sslPinning || bypasses.jailbreak) ? 'bg-emerald-400' : 'bg-gray-500'"></span>
+            <svg class="w-3.5 h-3.5" :class="(bypasses.sslPinning || bypasses.jailbreak) ? 'text-emerald-400' : 'text-gray-400'"
+                 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path v-if="bypasses.sslPinning || bypasses.jailbreak" d="M9 12l2 2 4-4"/>
+            </svg>
             <span class="font-bold">Bypasses</span>
+            <span v-if="activeBypassCount > 0"
+                  class="text-[9px] px-1 rounded font-bold bg-emerald-500/40 text-white">{{ activeBypassCount }}</span>
             <svg class="w-3 h-3 text-gray-400 transition-transform" :class="showBypassMenu ? 'rotate-180' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="6 9 12 15 18 9"></polyline>
             </svg>
@@ -225,63 +231,114 @@
           <!-- Dropdown Popover Menu -->
           <div
             v-if="showBypassMenu"
-            class="absolute right-0 mt-1.5 w-68 bg-cyber-900 border border-cyber-border rounded-lg shadow-2xl p-2.5 z-50 text-xs font-mono space-y-2.5 glow-cyan animate-in fade-in duration-100">
-            <div class="flex items-center justify-between pb-1.5 border-b border-cyber-border text-[11px] text-gray-400">
-              <span class="font-bold uppercase tracking-wider text-cyan-400">Security Bypasses</span>
-              <span class="text-[10px] text-gray-500">Early Hooks</span>
+            class="absolute right-0 mt-2 w-[336px] bg-cyber-900 border border-cyber-border rounded-xl shadow-2xl z-50 font-mono overflow-hidden glow-cyan animate-in fade-in duration-100">
+
+            <!-- Header -->
+            <div class="px-3.5 pt-3 pb-2.5 bg-cyber-950/60 border-b border-cyber-border">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                  <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(0,240,255,0.8)]"></span>
+                  <span class="text-[11px] font-bold uppercase tracking-[0.12em] text-cyan-400">Security Bypasses</span>
+                </div>
+                <span class="text-[9px] uppercase tracking-wider text-gray-500 bg-cyber-800 border border-cyber-border px-1.5 py-0.5 rounded">Early Hooks</span>
+              </div>
+              <p class="mt-1.5 text-[10px] text-gray-500 leading-relaxed">
+                Injected before <span class="text-gray-400">main()</span>. Changes apply to new connections only.
+              </p>
             </div>
 
-            <!-- SSL Pinning Row -->
-            <div class="flex items-center justify-between p-1.5 bg-cyber-950 rounded border border-cyber-border/70">
-              <div>
-                <div class="text-white font-semibold">SSL Pinning Bypass</div>
-                <div class="text-[10px] text-gray-400">BoringSSL, NSURLSession, SecTrust</div>
+            <!-- Bypass rows -->
+            <div class="p-2.5 space-y-1.5">
+
+              <!-- SSL Pinning Row -->
+              <div class="group flex items-center justify-between gap-2.5 p-2 rounded-lg border transition"
+                   :class="bypasses.sslPinning ? 'bg-emerald-500/[0.07] border-emerald-500/30' : 'bg-cyber-950 border-cyber-border/70 hover:border-cyber-600'">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <div class="w-7 h-7 shrink-0 rounded-md flex items-center justify-center border transition"
+                       :class="bypasses.sslPinning ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400' : 'bg-cyber-800 border-cyber-border text-gray-500'">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="11" width="18" height="11" rx="2"/>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="text-[11.5px] font-semibold leading-tight" :class="bypasses.sslPinning ? 'text-emerald-200' : 'text-gray-200'">SSL Pinning Bypass</div>
+                    <div class="text-[9.5px] text-gray-500 leading-tight mt-0.5 truncate">BoringSSL · NSURLSession · SecTrust</div>
+                  </div>
+                </div>
+                <button
+                  @click="toggleBypass('sslPinning')"
+                  role="switch"
+                  :aria-checked="bypasses.sslPinning"
+                  class="relative shrink-0 w-9 h-[18px] rounded-full transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-emerald-400/50"
+                  :class="bypasses.sslPinning ? 'bg-emerald-500' : 'bg-cyber-700'">
+                  <span class="absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform duration-150"
+                        :class="bypasses.sslPinning ? 'translate-x-[18px]' : 'translate-x-0'"></span>
+                </button>
               </div>
+
+              <!-- Jailbreak Row -->
+              <div class="group flex items-center justify-between gap-2.5 p-2 rounded-lg border transition"
+                   :class="bypasses.jailbreak ? 'bg-emerald-500/[0.07] border-emerald-500/30' : 'bg-cyber-950 border-cyber-border/70 hover:border-cyber-600'">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <div class="w-7 h-7 shrink-0 rounded-md flex items-center justify-center border transition"
+                       :class="bypasses.jailbreak ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400' : 'bg-cyber-800 border-cyber-border text-gray-500'">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="text-[11.5px] font-semibold leading-tight" :class="bypasses.jailbreak ? 'text-emerald-200' : 'text-gray-200'">Jailbreak Detection</div>
+                    <div class="text-[9.5px] text-gray-500 leading-tight mt-0.5 truncate">Filesystem · Dyld · Sysctl · Forks</div>
+                  </div>
+                </div>
+                <button
+                  @click="toggleBypass('jailbreak')"
+                  role="switch"
+                  :aria-checked="bypasses.jailbreak"
+                  class="relative shrink-0 w-9 h-[18px] rounded-full transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-emerald-400/50"
+                  :class="bypasses.jailbreak ? 'bg-emerald-500' : 'bg-cyber-700'">
+                  <span class="absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform duration-150"
+                        :class="bypasses.jailbreak ? 'translate-x-[18px]' : 'translate-x-0'"></span>
+                </button>
+              </div>
+
+              <!-- Clean Relaunch (Spawn) Action -->
               <button
-                @click="toggleBypass('sslPinning')"
-                class="px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center space-x-1"
-                :class="bypasses.sslPinning ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50' : 'bg-cyber-800 text-gray-400 border border-cyber-border hover:bg-cyber-750'">
-                <span>{{ bypasses.sslPinning ? 'ON' : 'OFF' }}</span>
+                @click="relaunchTargetApp(); showBypassMenu = false;"
+                class="w-full mt-0.5 px-2.5 py-2 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 hover:border-cyan-500/50 text-cyan-300 rounded-lg font-bold text-[11px] transition flex items-center justify-center space-x-1.5">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                </svg>
+                <span>Clean Relaunch (Spawn)</span>
               </button>
             </div>
 
-            <!-- Jailbreak Row -->
-            <div class="flex items-center justify-between p-1.5 bg-cyber-950 rounded border border-cyber-border/70">
-              <div>
-                <div class="text-white font-semibold">Jailbreak Detection</div>
-                <div class="text-[10px] text-gray-400">Filesystem, Dyld, Sysctl, Forks</div>
+            <!-- Status footer -->
+            <div class="px-3.5 py-2.5 bg-cyber-950/60 border-t border-cyber-border space-y-1.5">
+              <div class="flex items-center justify-between text-[10px]">
+                <span class="flex items-center gap-1.5 text-gray-500">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_5px_rgba(16,185,129,0.7)]"></span>
+                  QUIC (UDP 443) Blocker
+                </span>
+                <span class="text-emerald-400 font-bold tracking-wide">ACTIVE</span>
               </div>
-              <button
-                @click="toggleBypass('jailbreak')"
-                class="px-2 py-0.5 rounded text-[10px] font-bold transition flex items-center space-x-1"
-                :class="bypasses.jailbreak ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50' : 'bg-cyber-800 text-gray-400 border border-cyber-border hover:bg-cyber-750'">
-                <span>{{ bypasses.jailbreak ? 'ON' : 'OFF' }}</span>
-              </button>
-            </div>
-
-            <!-- Clean Relaunch (Spawn) Action -->
-            <button
-              @click="relaunchTargetApp(); showBypassMenu = false;"
-              class="w-full px-2.5 py-1.5 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 rounded font-bold transition flex items-center justify-center space-x-1.5">
-              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
-              </svg>
-              <span>Clean Relaunch (Spawn)</span>
-            </button>
-
-            <!-- Status Info Pills -->
-            <div class="pt-1.5 border-t border-cyber-border/70 text-[10px] text-gray-400 space-y-1">
-              <div class="flex items-center justify-between">
-                <span>QUIC (UDP 443) Blocker:</span>
-                <span class="text-emerald-400 font-bold">ACTIVE</span>
+              <div class="flex items-center justify-between text-[10px]">
+                <span class="flex items-center gap-1.5 text-gray-500">
+                  <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_5px_rgba(0,240,255,0.7)]"></span>
+                  BoringSSL Coercion
+                </span>
+                <span class="text-cyan-400 font-bold tracking-wide">READY</span>
               </div>
-              <div class="flex items-center justify-between">
-                <span>BoringSSL Coercion:</span>
-                <span class="text-cyan-400 font-bold">READY</span>
-              </div>
-              <div v-if="bypasses.sslPinning" class="flex items-center justify-between">
-                <span>To capture HTTPS in Burp:</span>
-                <span class="text-amber-400 font-bold">Enable Transparent Redirection</span>
+              <div v-if="bypasses.sslPinning && !proxy.enabled" class="flex items-start gap-1.5 pt-1.5 mt-0.5 border-t border-cyber-border/60">
+                <svg class="w-3 h-3 text-amber-400 shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <span class="text-[9.5px] text-amber-400/90 leading-snug">
+                  HTTPS still needs <span class="font-bold">Transparent Redirection</span> enabled to reach Burp.
+                </span>
               </div>
             </div>
           </div>
@@ -1996,6 +2053,10 @@
 
         get appsCount() {
           return this.availableApps.filter(a => a.type === "app").length;
+        },
+
+        get activeBypassCount() {
+          return (this.bypasses.sslPinning ? 1 : 0) + (this.bypasses.jailbreak ? 1 : 0);
         },
 
         get runningAppsCount() {

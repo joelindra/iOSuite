@@ -52,7 +52,35 @@ def detect_connected_device_and_app(use_usb: bool = True, device_id: str | None 
         return f"Unknown ({e})", "auto", None
 
 
-def print_banner(target: str, device_name: str, mock_mode: bool, mode_ui: str, bridge_port: int = 1337):
+def detect_ca_preflight(host: str, port: int, ca_cert: str | None = None) -> dict:
+    """Ask the iPhone's Security.framework whether the Burp CA is trusted.
+
+    Runs before the UI opens so an untrusted CA shows up in the startup banner
+    rather than as silent capture failures later (iOS reports that case as
+    NSURLError -1202). Never raises: any failure degrades to state
+    "unavailable" so startup is not blocked by a diagnostic.
+    """
+    try:
+        from iosuite.core.cadetect import detect_ca_trust_state
+        return detect_ca_trust_state(ca_cert=ca_cert, burp_host=host, burp_port=port)
+    except Exception as e:
+        return {
+            "state": "unavailable",
+            "detail": f"CA pre-flight check could not run: {type(e).__name__}: {e}",
+            "hint": None,
+            "subject": None,
+            "error": "exception",
+        }
+
+
+def print_banner(
+    target: str,
+    device_name: str,
+    mock_mode: bool,
+    mode_ui: str,
+    bridge_port: int = 1337,
+    ca_status: dict | None = None,
+):
     """Render startup dashboard banner."""
     banner_text = Text()
     banner_text.append(" iOSuite Studio ", style="bold black on cyan")
@@ -76,7 +104,32 @@ def print_banner(target: str, device_name: str, mock_mode: bool, mode_ui: str, b
     banner_text.append(" Sync Bridge: ", style="gray")
     banner_text.append(f"http://127.0.0.1:{bridge_port} (IDA / Ghidra / Hopper / LLDB)\n", style="bold magenta")
 
-    console.print(Panel(banner_text, border_style="cyan", title="[bold cyan]SYSTEM INITIALIZED[/bold cyan]", title_align="left"))
+    if ca_status:
+        state = ca_status.get("state", "unavailable")
+        label, style = {
+            "trusted": ("TRUSTED", "bold green"),
+            "untrusted": ("NOT TRUSTED", "bold red"),
+        }.get(state, ("UNAVAILABLE", "bold yellow"))
+        banner_text.append(" CA Check:    ", style="gray")
+        banner_text.append(label, style=style)
+        subject = ca_status.get("subject")
+        if subject:
+            banner_text.append(f"  ({subject})", style="dim")
+        banner_text.append("\n")
+        if state != "trusted":
+            detail = ca_status.get("detail") or "CA trust could not be verified"
+            banner_text.append("              ", style="gray")
+            banner_text.append(f"{detail}\n", style="yellow")
+            if ca_status.get("hint"):
+                banner_text.append("              ", style="gray")
+                banner_text.append(f"Fix: {ca_status['hint']}\n", style="bold yellow")
+
+    border = "cyan"
+    title = "[bold cyan]SYSTEM INITIALIZED[/bold cyan]"
+    if ca_status and ca_status.get("state") == "untrusted":
+        border = "red"
+        title = "[bold red]CA TRUST PROBLEM DETECTED[/bold red]"
+    console.print(Panel(banner_text, border_style=border, title=title, title_align="left"))
 
 
 def main():
@@ -126,6 +179,21 @@ def main():
         default=None,
         help="Custom HTTP port for webview micro-daemon (default: auto)",
     )
+    parser.add_argument(
+        "--ca-cert",
+        type=str,
+        default=None,
+        help=(
+            "CA certificate (DER or PEM) to check on the device at startup.\n"
+            "Defaults to downloading the Burp CA from http://HOST:PORT/cert."
+        ),
+    )
+    parser.add_argument(
+        "--skip-ca-check",
+        action="store_true",
+        default=False,
+        help="Skip the startup CA-trust pre-flight check",
+    )
 
     args = parser.parse_args()
 
@@ -146,7 +214,26 @@ def main():
             console.print("[gray]Waiting for device connection or specify target: python main.py <AppName>[/gray]\n")
 
     mode_label = "Terminal TUI" if args.tui else "Desktop Webview Studio"
-    print_banner(target=target, device_name=device_name, mock_mode=args.mock, mode_ui=mode_label)
+
+    # Pre-flight CA-trust check (live hardware only). Runs before the banner so
+    # an untrusted Burp CA surfaces as a loud, actionable warning instead of
+    # silent iOS -1202 capture failures later.
+    ca_status = None
+    if not args.mock and not args.skip_ca_check:
+        console.print("[dim]Pre-flight: checking whether the Burp CA is trusted on the iPhone...[/dim]")
+        ca_status = detect_ca_preflight(host="192.168.50.216", port=1337, ca_cert=args.ca_cert)
+        if ca_status["state"] == "trusted":
+            console.print("[green][✓][/green] CA check: " + ca_status["detail"])
+        else:
+            console.print("[yellow][!][/yellow] CA check: " + ca_status["detail"])
+
+    print_banner(
+        target=target,
+        device_name=device_name,
+        mock_mode=args.mock,
+        mode_ui=mode_label,
+        ca_status=ca_status,
+    )
 
     # 1. Terminal TUI Mode
     if args.tui:
